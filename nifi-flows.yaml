@@ -1,0 +1,48 @@
+nifi:
+  kafkaBootstrapServers: kafka:9092
+  flowGroupName: file-to-kafka
+  defaultPollInterval: 10 sec
+  dropRoot: /data/nifi/drop
+  flows:
+    - name: file-to-app1-source
+      enabled: true
+      topic: app1.source
+      folder: app1.source
+      pollInterval: 10 sec
+      keepSourceFile: false
+    - name: file-to-app2-source
+      enabled: true
+      topic: app2.source
+      folder: app2.source
+      pollInterval: 10 sec
+      keepSourceFile: false
+    - name: file-to-app3-source
+      enabled: true
+      topic: app3.source
+      folder: app3.source
+      pollInterval: 10 sec
+      keepSourceFile: false
+    - name: file-to-app4-source
+      enabled: true
+      topic: app4.source
+      folder: app4.source
+      pollInterval: 10 sec
+      keepSourceFile: false
+    - name: file-to-app5-source
+      enabled: true
+      topic: app5.source
+      folder: app5.source
+      pollInterval: 10 sec
+      keepSourceFile: false
+    - name: file-to-app6-source
+      enabled: true
+      topic: app6.source
+      folder: app6.source
+      pollInterval: 10 sec
+      keepSourceFile: false
+    - name: file-to-app7-final
+      enabled: true
+      topic: app7.final
+      folder: app7.final
+      pollInterval: 10 sec
+      keepSourceFile: false

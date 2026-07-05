@@ -1,0 +1,79 @@
+# ALKALMASSAGI local Podman stack
+
+## Current infra pods
+
+- `java-build-pod`: Maven/JDK build pod for the Spring Boot JARs
+- `mssql-pod`: SQL Server internal `mssql:1433`, Windows host `40000`
+- `kafka-pod`: Kafka internal `kafka:9092`, external `40001`
+- `kafka-ui-pod`: Kafbat UI on `40002`
+- `sql-admin-pod`: DbGate on `40003`
+- `log-viewer-pod`: Dozzle log viewer on `40004`
+- `nifi-pod`: Apache NiFi file-to-Kafka UI on `40011`
+
+## Local URLs
+
+- Kafka UI: http://localhost:40002
+- SQL admin UI: http://localhost:40003
+- Log viewer UI: http://localhost:40004
+- Apache NiFi UI: http://localhost:40011/nifi
+- Browser page index: `.\browser-start.html`
+- Detailed browser page documentation: `BROWSER-PAGES.md`
+- Spring app YAML configuration guide: `APPLICATION-YAML-CONFIG.md`
+- Authenticated proxy guide: `PROXY-CONFIG.md`
+- Port configuration guide: `PORT-CONFIG.md`
+- Add a new app guide: `ADD-NEW-APP.md`
+- Script structure guide: `SCRIPT-STRUCTURE.md`
+- Log viewer guide: `LOG-VIEWER.md`
+- Log persistence guide: `LOG-PERSISTENCE.md`
+
+## SQL Server connection
+
+- From containers: `mssql:1433`
+- From Windows: `localhost,40000`
+- User: `sa`
+
+DbGate opens without a login screen and has preconfigured SQL Server connections:
+`Local MSSQL`, `app1_audit`, `app2_audit`, `app3_audit`, `app4_audit`, `app5_audit`, and `app6_audit`.
+
+Dozzle opens without a login screen at http://localhost:40004 and shows the logs for the app, SQL Server, Kafka, Kafka UI, DB admin, and log viewer containers.
+Old container logs are archived before pod recreation under `data\logs`.
+
+Apache NiFi opens without a login screen at http://localhost:40011/nifi.
+Its file-to-Kafka flow is generated from `nifi-flows.yaml`; drop folders are under `data\nifi\drop`.
+NiFi configuration, flow state, repositories and NiFi application logs are persisted under `data\nifi`.
+
+## Kafka connection
+
+- From containers: `kafka:9092`
+- From Windows: `localhost:40001`
+
+For this project the documented default is localhost access. If later you want LAN access too, see `PORT-CONFIG.md` and rerun the infra script with `-ExternalHostName <lan-ip>`.
+
+## Start infra
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-infra-pods.ps1 -SqlPassword 'Alkalmassagi_2026!'
+```
+
+## Build Java apps without host Java/Maven
+
+The host only needs Podman. Maven and JDK run in the `java-build-pod` pod.
+The Maven cache stays inside this project folder at `data\maven-repo`.
+
+If internet is available only through an authenticated proxy, fill `proxy.config.json` once and keep the same build command. Details: `PROXY-CONFIG.md`.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-apps-with-podman.ps1 -SkipTests
+podman pod ps --filter name=java-build-pod
+```
+
+## Enable LAN access
+
+Run this from an elevated PowerShell window:
+
+```powershell
+cd "<project-folder>"
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\configure-lan-firewall.ps1
+```
+
+This creates Windows firewall rules and `netsh interface portproxy` entries for the infra and service ports.

@@ -1,0 +1,22 @@
+# Runtime data and generated state
+/data/
+/work/
+
+# Java build outputs
+**/target/
+
+# Large offline image archive. Keep this out of develop.
+/offline-bundle/images/*.tar
+/offline-bundle/images/*.tar.part*
+
+# Local machine/proxy secrets
+/proxy.config.json
+
+# Local logs and temporary files
+*.log
+*.tmp
+*.bak
+*.swp
+Thumbs.db
+.DS_Store
+

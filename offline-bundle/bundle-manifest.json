@@ -1,0 +1,29 @@
+﻿{
+    "createdAt":  "2026-07-05T15:04:58",
+    "networkName":  "devnet",
+    "sqlImage":  "mcr.microsoft.com/mssql/server:2022-latest",
+    "kafkaImage":  "apache/kafka:3.9.0",
+    "kafkaUiImage":  "ghcr.io/kafbat/kafka-ui:latest",
+    "sqlAdminImage":  "dbgate/dbgate:latest",
+    "logViewerImage":  "amir20/dozzle:latest",
+    "nifiImage":  "apache/nifi:1.28.1",
+    "baseJavaImage":  "eclipse-temurin:21-jre-alpine",
+    "mavenImage":  "maven:3.9.9-eclipse-temurin-21",
+    "buildPodName":  "java-build-pod",
+    "images":  [
+                   "mcr.microsoft.com/mssql/server:2022-latest",
+                   "apache/kafka:3.9.0",
+                   "ghcr.io/kafbat/kafka-ui:latest",
+                   "dbgate/dbgate:latest",
+                   "amir20/dozzle:latest",
+                   "apache/nifi:1.28.1",
+                   "eclipse-temurin:21-jre-alpine",
+                   "maven:3.9.9-eclipse-temurin-21",
+                   "local/app1:dev",
+                   "local/app2:dev",
+                   "local/app3:dev",
+                   "local/app4:dev",
+                   "local/app5:dev",
+                   "local/app6:dev"
+               ]
+}

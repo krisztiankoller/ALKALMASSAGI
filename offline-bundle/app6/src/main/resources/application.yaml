@@ -1,0 +1,189 @@
+spring:
+  application:
+    name: app6
+  datasource:
+    # Local Podman default. Change this URL when SQL Server is outside the Podman network.
+    url: '${SPRING_DATASOURCE_URL:jdbc:sqlserver://mssql:1433;databaseName=master;encrypt=false;trustServerCertificate=true}'
+    username: '${SPRING_DATASOURCE_USERNAME:sa}'
+    password: '${SPRING_DATASOURCE_PASSWORD:Alkalmassagi_2026!}'
+    hikari:
+      maximum-pool-size: 5
+      # Example for SQL Server TLS with a JKS truststore packaged in this JAR.
+      # Put the file here: src/main/resources/security/sqlserver-truststore.jks
+      # Reference it as: classpath:security/sqlserver-truststore.jks
+      # Some JDBC drivers expect a filesystem path for trustStore. Keep this as
+      # the intended project location; adapt the driver property if needed.
+      # data-source-properties:
+      #   encrypt: true
+      #   trustServerCertificate: false
+      #   trustStore: classpath:security/sqlserver-truststore.jks
+      #   trustStorePassword: changeit
+      #   trustStoreType: JKS
+  kafka:
+    # Local Podman default. Change this when Kafka is outside the Podman network.
+    bootstrap-servers: '${SPRING_KAFKA_BOOTSTRAP_SERVERS:kafka:9092}'
+    consumer:
+      group-id: app6-group
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    listener:
+      ack-mode: record
+    # Examples for secured Kafka. Put JKS files under:
+    # src/main/resources/security/
+    #
+    # Direct Kafka client JKS property example:
+    # properties:
+    #   security.protocol: SSL
+    #   ssl.truststore.location: classpath:security/kafka.client.truststore.jks
+    #   ssl.truststore.password: changeit
+    #   ssl.truststore.type: JKS
+    #   ssl.keystore.location: classpath:security/kafka.client.keystore.jks
+    #   ssl.keystore.password: changeit
+    #   ssl.keystore.type: JKS
+    #   ssl.key.password: changeit
+    #
+    # SASL/SCRAM example:
+    # properties:
+    #   security.protocol: SASL_SSL
+    #   sasl.mechanism: SCRAM-SHA-512
+    #   sasl.jaas.config: org.apache.kafka.common.security.scram.ScramLoginModule required username="user" password="password";
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  health:
+    kafka:
+      enabled: true
+    db:
+      enabled: true
+
+logging:
+  level:
+    root: INFO
+    hu.alkalmassagi: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n"
+
+pipeline:
+  service-name: app6
+  database-name: app6_audit
+  schema-name: dbo
+  audit-table-name: audit_events
+  source-topic: app6.source
+  destination-topic: app7.final
+  topic-partitions: 1
+  topic-replicas: 1
+  forward-timeout-seconds: 30
+  create-database: true
+  create-audit-table: true
+
+# Example custom outbound services for future integrations.
+# Nothing in the current pipeline code calls these yet. Keep external URLs,
+# credentials, TLS/JKS, proxy, REST, and SOAP client settings here instead of
+# hard-coding them in Java source.
+external-services:
+  rest-order-api:
+    enabled: false
+    base-url: '${REST_ORDER_API_BASE_URL:https://partner.example.local/api}'
+    connect-timeout: 5s
+    read-timeout: 30s
+    default-headers:
+      x-client-system: '${REST_ORDER_API_CLIENT_SYSTEM:alkalmassagi}'
+      accept-language: '${REST_ORDER_API_ACCEPT_LANGUAGE:hu-HU}'
+    auth:
+      # Supported example modes: none, basic, bearer, mtls, oauth2-client-credentials.
+      mode: mtls
+      basic:
+        username: '${REST_ORDER_API_USERNAME:demo-user}'
+        password: '${REST_ORDER_API_PASSWORD:changeit}'
+      bearer:
+        token: '${REST_ORDER_API_BEARER_TOKEN:replace-me}'
+      oauth2-client-credentials:
+        token-url: '${REST_ORDER_API_TOKEN_URL:https://partner.example.local/oauth2/token}'
+        client-id: '${REST_ORDER_API_CLIENT_ID:alkalmassagi-client}'
+        client-secret: '${REST_ORDER_API_CLIENT_SECRET:changeit}'
+        scope: '${REST_ORDER_API_SCOPE:orders.write}'
+    tls:
+      enabled: true
+      # Put these files in src/main/resources/security/ so they are packaged in the JAR.
+      trust-store: classpath:security/rest-client-truststore.jks
+      trust-store-password: '${REST_ORDER_API_TRUSTSTORE_PASSWORD:changeit}'
+      trust-store-type: JKS
+      key-store: classpath:security/rest-client-keystore.jks
+      key-store-password: '${REST_ORDER_API_KEYSTORE_PASSWORD:changeit}'
+      key-store-type: JKS
+      key-password: '${REST_ORDER_API_KEY_PASSWORD:changeit}'
+    proxy:
+      enabled: false
+      host: '${REST_PROXY_HOST:proxy.local}'
+      port: '${REST_PROXY_PORT:8080}'
+      username: '${REST_PROXY_USERNAME:}'
+      password: '${REST_PROXY_PASSWORD:}'
+    example-calls:
+      create-order:
+        method: POST
+        path: /orders
+        content-type: application/json
+        idempotency-header: Idempotency-Key
+      get-order:
+        method: GET
+        path: /orders/{orderId}
+
+  soap-partner-service:
+    enabled: false
+    wsdl-url: '${SOAP_PARTNER_WSDL_URL:https://partner.example.local/ws/orders?wsdl}'
+    endpoint-url: '${SOAP_PARTNER_ENDPOINT_URL:https://partner.example.local/ws/orders}'
+    connect-timeout: 10s
+    read-timeout: 60s
+    soap-version: SOAP_12
+    soap-action: 'urn:SubmitOrder'
+    auth:
+      # Supported example modes: none, basic, mtls, ws-security-username-token.
+      mode: mtls
+      basic:
+        username: '${SOAP_PARTNER_USERNAME:demo-user}'
+        password: '${SOAP_PARTNER_PASSWORD:changeit}'
+      ws-security-username-token:
+        username: '${SOAP_PARTNER_WS_USERNAME:demo-user}'
+        password: '${SOAP_PARTNER_WS_PASSWORD:changeit}'
+        password-type: PasswordDigest
+        add-created: true
+        add-nonce: true
+    tls:
+      enabled: true
+      # Put these files in src/main/resources/security/ so they are packaged in the JAR.
+      trust-store: classpath:security/soap-client-truststore.jks
+      trust-store-password: '${SOAP_PARTNER_TRUSTSTORE_PASSWORD:changeit}'
+      trust-store-type: JKS
+      key-store: classpath:security/soap-client-keystore.jks
+      key-store-password: '${SOAP_PARTNER_KEYSTORE_PASSWORD:changeit}'
+      key-store-type: JKS
+      key-password: '${SOAP_PARTNER_KEY_PASSWORD:changeit}'
+    proxy:
+      enabled: false
+      host: '${SOAP_PROXY_HOST:proxy.local}'
+      port: '${SOAP_PROXY_PORT:8080}'
+      username: '${SOAP_PROXY_USERNAME:}'
+      password: '${SOAP_PROXY_PASSWORD:}'
+    example-calls:
+      submit-order:
+        operation: SubmitOrder
+        request-root: SubmitOrderRequest
+        response-root: SubmitOrderResponse
+      get-order-status:
+        operation: GetOrderStatus
+        request-root: GetOrderStatusRequest
+        response-root: GetOrderStatusResponse

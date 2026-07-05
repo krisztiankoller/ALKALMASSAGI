@@ -1,0 +1,24 @@
+{
+  "enabled": false,
+  "httpProxy": "http://proxy.ceg.local:8080",
+  "httpsProxy": "http://proxy.ceg.local:8080",
+  "username": "DOMAIN\\user",
+  "password": "change-me",
+  "noProxy": [
+    "localhost",
+    "127.0.0.1",
+    ".ceg.local",
+    "mssql",
+    "kafka",
+    "kafka-ui",
+    "sql-admin",
+    "nifi",
+    "app1",
+    "app2",
+    "app3",
+    "app4",
+    "app5",
+    "app6"
+  ]
+}
+

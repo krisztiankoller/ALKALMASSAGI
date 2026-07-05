@@ -1,0 +1,68 @@
+[
+    {
+        "name":  "app1",
+        "projectDir":  "app1",
+        "hostPort":  40005,
+        "containerPort":  8080,
+        "imageTag":  "local/app1:dev",
+        "env":  {
+                    "SPRING_PROFILES_ACTIVE":  "podman",
+                    "JAVA_OPTS":  "-Xms128m -Xmx512m"
+                }
+    },
+    {
+        "name":  "app2",
+        "projectDir":  "app2",
+        "hostPort":  40006,
+        "containerPort":  8080,
+        "imageTag":  "local/app2:dev",
+        "env":  {
+                    "SPRING_PROFILES_ACTIVE":  "podman",
+                    "JAVA_OPTS":  "-Xms128m -Xmx512m"
+                }
+    },
+    {
+        "name":  "app3",
+        "projectDir":  "app3",
+        "hostPort":  40007,
+        "containerPort":  8080,
+        "imageTag":  "local/app3:dev",
+        "env":  {
+                    "SPRING_PROFILES_ACTIVE":  "podman",
+                    "JAVA_OPTS":  "-Xms128m -Xmx512m"
+                }
+    },
+    {
+        "name":  "app4",
+        "projectDir":  "app4",
+        "hostPort":  40008,
+        "containerPort":  8080,
+        "imageTag":  "local/app4:dev",
+        "env":  {
+                    "SPRING_PROFILES_ACTIVE":  "podman",
+                    "JAVA_OPTS":  "-Xms128m -Xmx512m"
+                }
+    },
+    {
+        "name":  "app5",
+        "projectDir":  "app5",
+        "hostPort":  40009,
+        "containerPort":  8080,
+        "imageTag":  "local/app5:dev",
+        "env":  {
+                    "SPRING_PROFILES_ACTIVE":  "podman",
+                    "JAVA_OPTS":  "-Xms128m -Xmx512m"
+                }
+    },
+    {
+        "name":  "app6",
+        "projectDir":  "app6",
+        "hostPort":  40010,
+        "containerPort":  8080,
+        "imageTag":  "local/app6:dev",
+        "env":  {
+                    "SPRING_PROFILES_ACTIVE":  "podman",
+                    "JAVA_OPTS":  "-Xms128m -Xmx512m"
+                }
+    }
+]

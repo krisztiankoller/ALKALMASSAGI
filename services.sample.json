@@ -1,0 +1,24 @@
+[
+  {
+    "name": "app1",
+    "projectDir": "C:/dev/my-system/app1",
+    "hostPort": 40005,
+    "containerPort": 8080,
+    "imageTag": "local/app1:dev",
+    "env": {
+      "SPRING_PROFILES_ACTIVE": "podman",
+      "JAVA_OPTS": "-Xms256m -Xmx768m"
+    }
+  },
+  {
+    "name": "app2",
+    "projectDir": "C:/dev/my-system/app2",
+    "hostPort": 40006,
+    "containerPort": 8080,
+    "imageTag": "local/app2:dev",
+    "env": {
+      "SPRING_PROFILES_ACTIVE": "podman",
+      "JAVA_OPTS": "-Xms256m -Xmx768m"
+    }
+  }
+]
