@@ -126,18 +126,14 @@ function ConvertTo-WslPath {
     param([string]$Path)
 
     $resolvedPath = (Resolve-Path -LiteralPath $Path).Path
-    $distro = Get-PodmanWslDistro
-    $wslOutput = @(wsl.exe -d $distro -- wslpath -a $resolvedPath 2>&1)
-    if ($LASTEXITCODE -ne 0) {
-        throw "Could not convert path to WSL path using distro '$distro': $resolvedPath. Output: $($wslOutput -join ' ')"
+    $root = [System.IO.Path]::GetPathRoot($resolvedPath)
+    if ([string]::IsNullOrWhiteSpace($root) -or $root.Length -lt 2 -or $root[1] -ne ":") {
+        throw "Only local drive paths can be mounted into the Podman WSL machine. Path: $resolvedPath"
     }
 
-    $firstLine = $wslOutput | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1
-    if (-not $firstLine) {
-        throw "Could not convert path to WSL path using distro '$distro': $resolvedPath. The wslpath command returned no output."
-    }
-
-    return ([string]$firstLine).Trim()
+    $drive = ([string]$root[0]).ToLowerInvariant()
+    $relativePath = $resolvedPath.Substring($root.Length).Replace("\", "/")
+    return "/mnt/$drive/$relativePath"
 }
 
 function Format-ProjectRelativePath {
