@@ -100,12 +100,44 @@ function Invoke-Podman {
     }
 }
 
+function Get-PodmanWslDistro {
+    if ($script:PodmanWslDistro) {
+        return $script:PodmanWslDistro
+    }
+
+    $distros = @(wsl.exe -l -q 2>$null |
+        ForEach-Object { ($_ -replace "`0", "").Trim() } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+
+    $distro = $distros | Where-Object { $_ -eq "podman-machine-default" } | Select-Object -First 1
+    if (-not $distro) {
+        $distro = $distros | Where-Object { $_ -like "podman-machine-*" } | Select-Object -First 1
+    }
+
+    if (-not $distro) {
+        throw "No Podman WSL distro was found. Run these first: podman machine init; podman machine start. Then check: podman machine list; wsl -l -v"
+    }
+
+    $script:PodmanWslDistro = $distro
+    return $script:PodmanWslDistro
+}
+
 function ConvertTo-WslPath {
     param([string]$Path)
 
-    $resolvedPath = (Resolve-Path -Path $Path).Path
-    $wslPath = wsl -d podman-machine-default -- wslpath -a $resolvedPath
-    return ($wslPath | Select-Object -First 1).Trim()
+    $resolvedPath = (Resolve-Path -LiteralPath $Path).Path
+    $distro = Get-PodmanWslDistro
+    $wslOutput = @(wsl.exe -d $distro -- wslpath -a $resolvedPath 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not convert path to WSL path using distro '$distro': $resolvedPath. Output: $($wslOutput -join ' ')"
+    }
+
+    $firstLine = $wslOutput | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1
+    if (-not $firstLine) {
+        throw "Could not convert path to WSL path using distro '$distro': $resolvedPath. The wslpath command returned no output."
+    }
+
+    return ([string]$firstLine).Trim()
 }
 
 function Format-ProjectRelativePath {
