@@ -292,6 +292,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-offline.ps1 `
 - elinditja a `java-build-pod` build podot;
 - Maven/JDK kontenerrel forditja az `app1` - `app6` modulokat;
 - a Maven cache-t a projekt alatt tartja: `data\maven-repo`;
+- a build logot a projekt alatt tartja: `data\build-logs\current.log`;
+- Dozzle-ban lathato build log tailert indit: `java-build-log-viewer`;
+- a Maven build kontenert alapbol torli a build vegen, de `-KeepBuildContainer`
+  kapcsoloval megtarthato `java-maven-builder` neven;
 - nem inditja el az app podokat.
 
 `scripts\deploy-springboot-pods.ps1`:

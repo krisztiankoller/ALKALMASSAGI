@@ -42,6 +42,7 @@ Rovid szerepuk:
 - `configure-lan-firewall.ps1` - opcionalis LAN elereshez firewall/portproxy beallitas, admin jog kell.
 - `send-test-message.ps1` - teszt Kafka uzenet kuldese az `app1.source` topicba.
 - `export-container-logs.ps1` - aktualis kontenerlogok mentese a `data\logs` konyvtarba.
+- `build-apps-with-podman.ps1` - Maven build Podmanban, logokkal a `data\build-logs` konyvtarban es Dozzle-ban `java-build-log-viewer` neven.
 - `configure-nifi-file-to-kafka.ps1` - NiFi file-to-Kafka flow generalasa `nifi-flows.yaml` alapjan.
 - `split-offline-image.ps1` - nagy offline image tar darabolasa GitHub/LFS kompatibilis reszekre.
 - `join-offline-image.ps1` - darabolt offline image tar visszaallitasa.

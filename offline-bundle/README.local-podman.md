@@ -2,7 +2,7 @@
 
 ## Current infra pods
 
-- `java-build-pod`: Maven/JDK build pod for the Spring Boot JARs
+- `java-build-pod`: Maven/JDK build pod for the Spring Boot JARs and build logs
 - `mssql-pod`: SQL Server internal `mssql:1433`, Windows host `40000`
 - `kafka-pod`: Kafka internal `kafka:9092`, external `40001`
 - `kafka-ui-pod`: Kafbat UI on `40002`
@@ -145,8 +145,9 @@ DbGate opens without a login screen and has preconfigured SQL Server connections
 `Local MSSQL`, `app1_audit`, `app2_audit`, `app3_audit`, `app4_audit`, `app5_audit`, and `app6_audit`.
 The SQL admin container is started with `NODE_TLS_REJECT_UNAUTHORIZED=0`, so its Node.js runtime accepts self-signed/internal TLS certificates.
 
-Dozzle opens without a login screen at http://localhost:40004 and shows the logs for the app, SQL Server, Kafka, Kafka UI, DB admin, and log viewer containers.
+Dozzle opens without a login screen at http://localhost:40004 and shows the logs for the app, SQL Server, Kafka, Kafka UI, DB admin, Java build, and log viewer containers.
 Old container logs are archived before pod recreation under `data\logs`.
+Java build logs are also written under `data\build-logs`; open `java-build-log-viewer` in Dozzle to watch the latest build log.
 
 Apache NiFi opens without a login screen at http://localhost:40011/nifi.
 Its file-to-Kafka flow is generated from `nifi-flows.yaml`; drop folders are under `data\nifi\drop`.
@@ -170,6 +171,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-infra-pods.
 
 The host only needs Podman. Maven and JDK run in the `java-build-pod` pod.
 The Maven cache stays inside this project folder at `data\maven-repo`.
+The current build log stays inside this project folder at `data\build-logs\current.log`.
+The script also starts `java-build-log-viewer`, so the same build log is visible in Dozzle at http://localhost:40004.
 
 If internet is available only through an authenticated proxy, fill `proxy.config.json` once and keep the same build command. Details: `PROXY-CONFIG.md`.
 

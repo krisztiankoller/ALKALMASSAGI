@@ -99,6 +99,31 @@ pipeline:
 
 Itt allithato minden app sajat forras topicja, cel topicja, audit DB-je, tabla neve es topic letrehozasi parametere.
 
+### Podman health check extra csomag nelkul
+
+Az app image nem telepit `wget` vagy `curl` csomagot. Az app sajat maga frissit
+egy lokalis health fajlt a Spring Actuator `HealthEndpoint` eredmenye alapjan,
+a Podman health check pedig csak ezt nezi shell bepitett parancsokkal.
+
+```yaml
+local-health:
+  file:
+    enabled: true
+    path: '${APP_HEALTH_FILE_PATH:/tmp/app-health/ready}'
+    refresh-interval-ms: 5000
+    initial-delay-ms: 5000
+```
+
+A deploy script alapbol ezt adja at a kontenernek:
+
+```text
+APP_HEALTH_FILE_PATH=/tmp/app-health/ready
+```
+
+Ha mas utvonalat akarsz, a `services.json` adott app `env` reszeben ugyanazt az
+`APP_HEALTH_FILE_PATH` valtozot allitsd be, es az `application.yaml` is ezt fogja
+hasznalni.
+
 ## Security peldak
 
 Az `application.yaml` fajlok kommentben tartalmaznak peldakat, es ezek mar az app JAR-ba csomagolt `security/` konyvtarra hivatkoznak:

@@ -50,6 +50,35 @@ Ez azt jelenti, hogy ezek logjai is megmaradnak ujrainditas elott:
 - kafka-ui
 - sql-admin
 - log-viewer
+- java-build-log-viewer
+- java-maven-builder
+
+## Java build logok
+
+A Maven build logok kulon is megmaradnak itt:
+
+```text
+.\data\build-logs
+```
+
+Az aktualis build log:
+
+```text
+.\data\build-logs\current.log
+```
+
+Uj build inditasakor a regi `current.log` timestampelt fajlba kerul, peldaul:
+
+```text
+.\data\build-logs\build-20260706-142500.log
+```
+
+A `java-build-log-viewer` kontener a build utan a teljes `current.log` fajlt
+kiirja a sajat kontenerlogjaba, ezert a build log Dozzle-ban is lathato:
+
+```text
+http://localhost:40004 -> java-build-log-viewer
+```
 
 ## Kezi log export
 

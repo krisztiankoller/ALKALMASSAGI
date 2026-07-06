@@ -16,6 +16,8 @@ Egy bongeszoben, egy helyen lehet nezni a kontenerek logjait:
 - kafka
 - kafka-ui
 - sql-admin
+- java-build-log-viewer
+- java-maven-builder
 - log-viewer
 
 ## URL
@@ -43,6 +45,61 @@ A log viewer pod ezt mountolja:
 ```
 
 Ezert latja az osszes kontenert es azok logjait.
+
+## Java build logok
+
+A Java/Maven buildet a `scripts\build-apps-with-podman.ps1` script a
+`java-build-pod` podban futtatja. A buildhez ket fontos kontener tartozik:
+
+```text
+java-build-log-viewer
+java-maven-builder
+```
+
+`java-build-log-viewer` egy futo kontener, amely a build utan kiirja a projekt
+alatti aktualis build log fajl teljes tartalmat a sajat kontenerlogjaba:
+
+```text
+.\data\build-logs\current.log
+```
+
+Dozzle-ban ezt a kontenert nyisd meg, ha a build logot webes feluleten akarod
+nezni:
+
+```text
+http://localhost:40004 -> java-build-log-viewer
+```
+
+Igy a Dozzle-ban a teljes utolso build log latszik akkor is, ha maga a Maven
+build kontener mar kilepett es torlodott.
+
+`java-maven-builder` maga a Maven build kontener. A script alapbol torli a build
+utan, hogy a `java-build-pod` statusza tiszta maradjon. Ha hibakereseshez meg
+akarod tartani a nyers kontenerlogot is:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-apps-with-podman.ps1 `
+  -SkipTests `
+  -KeepBuildContainer
+```
+
+Ilyenkor:
+
+```powershell
+podman logs java-maven-builder
+```
+
+A kovetkezo build elott a script torli az elozo `java-maven-builder` kontenert,
+majd letrehozza az ujat. A regi `current.log` fajlt minden build elejen
+timestampelt fajlba menti ugyanabban a konyvtarban.
+
+Ha valamiert nem akarod a webes build log tailert:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-apps-with-podman.ps1 `
+  -SkipTests `
+  -DisableBuildLogViewer
+```
 
 ## Inditas
 

@@ -247,13 +247,6 @@ function Add-ProxyBuildArgs {
         }
     }
 }
-function Add-ApkTlsBuildArg {
-    param([System.Collections.Generic.List[string]]$ArgumentList)
-    if ($script:PodmanTlsVerify -eq $false) {
-        $ArgumentList.Add("--build-arg")
-        $ArgumentList.Add("APK_INSECURE_TLS=true")
-    }
-}
 function Find-ServiceJar {
     param([string]$ProjectDir)
     $targetDir = Join-Path $ProjectDir "target"
@@ -427,7 +420,6 @@ foreach ($service in $services) {
             $buildArgs.Add($arg)
         }
         Add-PodmanTlsVerifyArg -ArgumentList $buildArgs
-        Add-ApkTlsBuildArg -ArgumentList $buildArgs
         Add-ProxyBuildArgs -ArgumentList $buildArgs -HttpProxy $effectiveHttpProxy -HttpsProxy $effectiveHttpsProxy -NoProxy $effectiveNoProxy
         $buildArgs.Add($buildDir)
         & podman @($buildArgs.ToArray())
@@ -446,11 +438,12 @@ foreach ($service in $services) {
         "run", "-d",
         "--pod", $podName,
         "--name", $name,
-        "--health-cmd", "wget -q -T 5 -O - http://127.0.0.1:${containerPort}/actuator/health >/dev/null || exit 1",
+        "--health-cmd", 'test -s "${APP_HEALTH_FILE_PATH:-/tmp/app-health/ready}" && kill -0 1',
         "--health-interval", "10s",
         "--health-timeout", "5s",
         "--health-retries", "12",
         "--health-start-period", "60s",
+        "-e", "APP_HEALTH_FILE_PATH=/tmp/app-health/ready",
         "-v", "$(ConvertTo-WslPath $applicationYaml):/app/config/application.yaml:ro"
     )
     foreach ($arg in $baseRunArgs) {

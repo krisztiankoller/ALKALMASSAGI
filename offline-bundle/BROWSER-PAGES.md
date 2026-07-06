@@ -18,6 +18,7 @@ Ez a projekt helyi bongeszoben hasznos oldalainak rovid listaja.
 - [Dozzle - log viewer](http://localhost:40004)
   - Jelszo nelkul nyilik.
   - Egy helyen mutatja az appok, SQL Server, Kafka es admin kontenerek logjait.
+  - Java build loghoz keresd ezt: `java-build-log-viewer`.
 
 - [Apache NiFi - file to Kafka](http://localhost:40011/nifi)
   - Jelszo nelkul nyilik.

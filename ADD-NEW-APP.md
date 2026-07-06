@@ -178,6 +178,13 @@ management:
       probes:
         enabled: true
 
+local-health:
+  file:
+    enabled: true
+    path: '${APP_HEALTH_FILE_PATH:/tmp/app-health/ready}'
+    refresh-interval-ms: 5000
+    initial-delay-ms: 5000
+
 pipeline:
   service-name: app7
   database-name: app7_audit

@@ -2,7 +2,9 @@ param(
     [string]$MavenImage = "maven:3.9.9-eclipse-temurin-21",
     [string]$BuildPodName = "java-build-pod",
     [string]$BuildContainerName = "java-maven-builder",
+    [string]$BuildLogViewerContainerName = "java-build-log-viewer",
     [string]$MavenRepoDir = "",
+    [string]$BuildLogDir = "",
     [string]$ProxyConfigFile = "",
     [string]$HttpProxy = "",
     [string]$HttpsProxy = "",
@@ -14,6 +16,7 @@ param(
     [switch]$SkipTests,
     [switch]$Offline,
     [switch]$KeepBuildContainer,
+    [switch]$DisableBuildLogViewer,
     [Alias("h", "?")]
     [switch]$Help
 )
@@ -52,10 +55,17 @@ Fontos parameterek:
   -BuildPodName
       A build pod neve. Alapertelmezett: java-build-pod
   -BuildContainerName
-      Az ideiglenes Maven kontener neve. Alapertelmezett: java-maven-builder
+      A Maven build kontener neve. Alapertelmezett: java-maven-builder.
+      A script alapbol torli a vegen, mert a webes build logot a
+      java-build-log-viewer mutatja.
+  -BuildLogViewerContainerName
+      A Dozzle-ban futo, build log fajlt tail-elo kontener neve.
+      Alapertelmezett: java-build-log-viewer
   -MavenRepoDir
       Maven cache konyvtar a projekt alatt vagy abszolut utvonallal.
       Uresen: .\data\maven-repo
+  -BuildLogDir
+      Build log konyvtar. Uresen: .\data\build-logs
   -ProxyConfigFile
       Proxy config JSON. Uresen: .\proxy.config.json
   -HttpProxy, -HttpsProxy, -NoProxy, -ProxyUsername, -ProxyPassword
@@ -73,11 +83,19 @@ Fontos parameterek:
   -Offline
       Maven offline mod: -o. Csak akkor mukodik, ha a Maven cache mar tartalmazza a dependency-ket.
   -KeepBuildContainer
-      Nem torli a build kontenert a vegen. Hibakereseshez hasznos.
+      Nem torli a Maven build kontenert a vegen. Hibakereseshez hasznos, ha a
+      nyers `podman logs java-maven-builder` kimenetet is meg akarod tartani.
+      Ilyenkor a java-build-pod statusza Degraded lehet, mert a Maven kontener
+      sikeresen kilepett.
+  -DisableBuildLogViewer
+      Nem inditja el a java-build-log-viewer kontenert. Ilyenkor a build log
+      csak a java-maven-builder kontener logjaban es a fajlban marad meg.
   --help
       Ezt a reszletes leirast irja ki es nem futtat buildet.
 Eredmeny:
   app1\target\*.jar ... app6\target\*.jar
+  .\data\build-logs\current.log
+  Dozzle: http://localhost:40004 -> java-build-log-viewer
 Megjegyzes:
   Ez csak JAR-t buildel. Kontener image-et a deploy-springboot-pods.ps1 vagy
   az export-offline-bundle.ps1 keszit.
@@ -93,6 +111,53 @@ function Invoke-Podman {
     if ($LASTEXITCODE -ne 0) {
         throw "podman $($Arguments -join ' ') failed with exit code $LASTEXITCODE"
     }
+}
+function Invoke-PodmanWithLog {
+    param(
+        [string[]]$Arguments,
+        [string]$LogPath
+    )
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    $writer = [System.IO.StreamWriter]::new($LogPath, $true, $utf8NoBom)
+    try {
+        & podman @Arguments 2>&1 | ForEach-Object {
+            $line = [string]$_
+            Write-Host $line
+            $writer.WriteLine($line)
+            $writer.Flush()
+        }
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $writer.Dispose()
+    }
+    if ($exitCode -ne 0) {
+        throw "podman $($Arguments -join ' ') failed with exit code $exitCode"
+    }
+}
+function Start-BuildLogViewer {
+    param(
+        [string]$ContainerName,
+        [string]$PodName,
+        [string]$Image,
+        [string]$BuildLogDirWsl
+    )
+    & podman container exists $ContainerName *> $null
+    if ($LASTEXITCODE -eq 0) {
+        Invoke-Podman -Arguments @("rm", "-f", $ContainerName)
+    }
+    $logViewerArgs = [System.Collections.Generic.List[string]]::new()
+    foreach ($arg in @(
+        "run", "-d",
+        "--name", $ContainerName,
+        "--pod", $PodName,
+        "-v", "${BuildLogDirWsl}:/build-logs",
+        $Image,
+        "sh", "-lc", "cat /build-logs/current.log; tail -f /dev/null"
+    )) {
+        $logViewerArgs.Add($arg)
+    }
+    Invoke-Podman -Arguments $logViewerArgs.ToArray()
 }
 function Get-PodmanWslDistro {
     if ($script:PodmanWslDistro) {
@@ -371,6 +436,29 @@ if ([string]::IsNullOrWhiteSpace($MavenRepoDir)) {
     }
 }
 New-Item -ItemType Directory -Force -Path $mavenRepo | Out-Null
+if ([string]::IsNullOrWhiteSpace($BuildLogDir)) {
+    $buildLogDirResolved = Join-Path $projectRoot "data\build-logs"
+} else {
+    $buildLogDirResolved = $BuildLogDir
+    if (-not [System.IO.Path]::IsPathRooted($buildLogDirResolved)) {
+        $buildLogDirResolved = Join-Path $projectRoot $buildLogDirResolved
+    }
+}
+New-Item -ItemType Directory -Force -Path $buildLogDirResolved | Out-Null
+$currentBuildLog = Join-Path $buildLogDirResolved "current.log"
+if ((Test-Path -LiteralPath $currentBuildLog) -and (Get-Item -LiteralPath $currentBuildLog).Length -gt 0) {
+    $previousBuildLog = Join-Path $buildLogDirResolved ("build-{0}.log" -f (Get-Date -Format "yyyyMMdd-HHmmss"))
+    Copy-Item -LiteralPath $currentBuildLog -Destination $previousBuildLog -Force
+}
+$buildLogHeader = @(
+    "Build started: $(Get-Date -Format o)",
+    "Build pod: $BuildPodName",
+    "Build container: $BuildContainerName",
+    "Maven image: $MavenImage",
+    ""
+)
+$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+[System.IO.File]::WriteAllLines($currentBuildLog, $buildLogHeader, $utf8NoBom)
 $effectiveHttpProxy = Resolve-ProxyUrl -Url $script:HttpProxy -Username $script:ProxyUsername -Password $script:ProxyPassword
 $effectiveHttpsProxy = Resolve-ProxyUrl -Url $(if ([string]::IsNullOrWhiteSpace($script:HttpsProxy)) { $script:HttpProxy } else { $script:HttpsProxy }) -Username $script:ProxyUsername -Password $script:ProxyPassword
 $effectiveNoProxy = $script:NoProxy
@@ -378,6 +466,7 @@ Set-ProxyEnvironment -HttpProxy $effectiveHttpProxy -HttpsProxy $effectiveHttpsP
 Write-MavenSettingsWithProxy -MavenRepo $mavenRepo -HttpProxy $effectiveHttpProxy -HttpsProxy $effectiveHttpsProxy -NoProxy $effectiveNoProxy
 $projectRootWsl = ConvertTo-WslPath $projectRoot
 $mavenRepoWsl = ConvertTo-WslPath $mavenRepo
+$buildLogDirWsl = ConvertTo-WslPath $buildLogDirResolved
 if (-not $Offline) {
     $pullArgs = [System.Collections.Generic.List[string]]::new()
     foreach ($arg in @("pull", "--platform", "linux/amd64")) {
@@ -422,10 +511,26 @@ $runArgs.Add($MavenImage)
 foreach ($arg in $mavenArgs.ToArray()) {
     $runArgs.Add($arg)
 }
-Invoke-Podman -Arguments $runArgs.ToArray()
+try {
+    Invoke-PodmanWithLog -Arguments $runArgs.ToArray() -LogPath $currentBuildLog
+}
+catch {
+    if (-not $DisableBuildLogViewer) {
+        Start-BuildLogViewer -ContainerName $BuildLogViewerContainerName -PodName $BuildPodName -Image $MavenImage -BuildLogDirWsl $buildLogDirWsl
+    }
+    throw
+}
 if (-not $KeepBuildContainer) {
     Invoke-Podman -Arguments @("rm", $BuildContainerName)
 }
+if (-not $DisableBuildLogViewer) {
+    Start-BuildLogViewer -ContainerName $BuildLogViewerContainerName -PodName $BuildPodName -Image $MavenImage -BuildLogDirWsl $buildLogDirWsl
+}
 Write-Output "Build completed in Podman pod: $BuildPodName"
 Write-Output "Maven cache folder: $(Format-ProjectRelativePath -Path $mavenRepo -Root $projectRoot)"
+Write-Output "Build log file: $(Format-ProjectRelativePath -Path $currentBuildLog -Root $projectRoot)"
+if (-not $DisableBuildLogViewer) {
+    Write-Output "Dozzle log viewer: http://localhost:40004 -> $BuildLogViewerContainerName"
+}
+Write-Output "Raw Maven container logs kept only with: -KeepBuildContainer"
 Write-Output "Show it with: podman pod ps --filter name=$BuildPodName"

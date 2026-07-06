@@ -22,11 +22,13 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.config.TopicBuilder;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 import jakarta.annotation.PostConstruct;
 
 @SpringBootApplication
 @EnableConfigurationProperties(PipelineProperties.class)
+@EnableScheduling
 public class PipelineApplication {
     public static void main(String[] args) {
         SpringApplication.run(PipelineApplication.class, args);

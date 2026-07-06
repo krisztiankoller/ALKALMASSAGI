@@ -160,7 +160,9 @@ Ehhez a `services.json`-ban:
 }
 ```
 
-Ha a `server.port` es a `containerPort` nem egyezik, a pod health check es a port mapping hibazhat.
+Ha a `server.port` es a `containerPort` nem egyezik, a port mapping hibazhat.
+A pod health check nem hasznal HTTP kliens csomagot, hanem az app altal frissitett
+`APP_HEALTH_FILE_PATH` fajlt figyeli.
 
 ## Kafka portok
 

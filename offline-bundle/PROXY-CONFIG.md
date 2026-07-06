@@ -7,7 +7,7 @@ Ez a dokumentum azt irja le, mit kell csinalni akkor, ha van internet, de csak a
 Proxy akkor kell, amikor a gepnek internetrol kell letoltenie valamit:
 
 - `podman pull`
-- `podman build` kozbeni csomagletoltes, peldaul `apk add wget`
+- `podman build`, ha az alap image-et vagy build contextet el kell erni
 - Maven dependency letoltes
 - offline bundle keszitese a forras gepen
 
@@ -78,13 +78,9 @@ Ez a scriptekben a Podman `pull` es `build` parancsokhoz ezt adja hozza:
 --tls-verify=false
 ```
 
-Spring Boot app image buildnel ezen felul a Containerfile ezt a build argot kapja:
-
-```text
-APK_INSECURE_TLS=true
-```
-
-Ilyenkor az Alpine `apk add wget` lepes `--no-check-certificate` kapcsoloval fut, ami ceges TLS inspection mogott segithet az app image build kozbeni csomagletoltesnel.
+Az app image Containerfile nem telepit csomagot `apk add`-dal, ezert az app image
+buildjehez nem kell kulon Alpine TLS workaround. A health check sem hasznal
+`wget` vagy `curl` csomagot.
 
 Maven dependency letoltesnel pedig ezekkel futtatja a Maven buildet:
 
