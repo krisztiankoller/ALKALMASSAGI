@@ -1,4 +1,4 @@
-# Start guide - offline Podman stack
+# Start guide - offline Podman stack 
 
 Ez a dokumentum azt irja le, hogyan kell a teljes rendszert atvinni es elinditani egy masik Windows gepen ugy, hogy azon csak Podman legyen telepitve, internet ne legyen, Java/Maven ne legyen, es Windows admin jog se kelljen.
 
