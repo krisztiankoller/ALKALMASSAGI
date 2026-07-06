@@ -20,8 +20,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 $script:InvocationBoundParameters = $PSBoundParameters
-$script:PodmanTlsVerify = $PodmanTlsVerify
-$script:MavenTlsVerify = $MavenTlsVerify
+$script:ConfiguredPodmanTlsVerify = $PodmanTlsVerify
+$script:ConfiguredMavenTlsVerify = $MavenTlsVerify
 
 function Show-Help {
     @'
@@ -205,11 +205,11 @@ function Apply-ProxyConfigFile {
     $config = Get-Content -LiteralPath $ConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
     if (-not $script:InvocationBoundParameters.ContainsKey("PodmanTlsVerify") -and
         $config.PSObject.Properties.Name -contains "podmanTlsVerify") {
-        $script:PodmanTlsVerify = $config.podmanTlsVerify
+        $script:ConfiguredPodmanTlsVerify = $config.podmanTlsVerify
     }
     if (-not $script:InvocationBoundParameters.ContainsKey("MavenTlsVerify") -and
         $config.PSObject.Properties.Name -contains "mavenTlsVerify") {
-        $script:MavenTlsVerify = $config.mavenTlsVerify
+        $script:ConfiguredMavenTlsVerify = $config.mavenTlsVerify
     }
     if ($null -eq $config -or $config.enabled -ne $true) {
         return
@@ -249,29 +249,39 @@ function Resolve-ProxyUrl {
 
     $builder = [System.UriBuilder]::new($Url)
     if (-not [string]::IsNullOrWhiteSpace($Username) -and [string]::IsNullOrWhiteSpace($builder.UserName)) {
-        $builder.UserName = $Username
-        $builder.Password = $Password
+        $authority = if ($builder.Port -gt 0) { "$($builder.Host):$($builder.Port)" } else { $builder.Host }
+        $credentialPrefix = [System.Uri]::EscapeDataString($Username)
+        if (-not [string]::IsNullOrWhiteSpace($Password)) {
+            $credentialPrefix = "{0}:{1}" -f $credentialPrefix, [System.Uri]::EscapeDataString($Password)
+        }
+
+        $path = $builder.Path
+        if ([string]::IsNullOrWhiteSpace($path)) {
+            $path = "/"
+        }
+
+        return "{0}://{1}@{2}{3}{4}" -f $builder.Scheme, $credentialPrefix, $authority, $path, $builder.Query
     }
 
     return $builder.Uri.AbsoluteUri
 }
 
 function Add-PodmanTlsVerifyArg {
-    param([System.Collections.Generic.List[string]]$Args)
+    param([System.Collections.Generic.List[string]]$ArgumentList)
 
-    if ($script:PodmanTlsVerify -eq $false) {
-        $Args.Add("--tls-verify=false")
+    if ($script:ResolvedPodmanTlsVerify -eq $false) {
+        $ArgumentList.Add("--tls-verify=false")
     }
 }
 
 function Add-MavenTlsVerifyArgs {
-    param([System.Collections.Generic.List[string]]$Args)
+    param([System.Collections.Generic.List[string]]$ArgumentList)
 
-    if ($script:MavenTlsVerify -eq $false) {
-        $Args.Add("-Dmaven.resolver.transport=wagon")
-        $Args.Add("-Dmaven.wagon.http.ssl.insecure=true")
-        $Args.Add("-Dmaven.wagon.http.ssl.allowall=true")
-        $Args.Add("-Dmaven.wagon.http.ssl.ignore.validity.dates=true")
+    if ($script:ResolvedMavenTlsVerify -eq $false) {
+        $ArgumentList.Add("-Dmaven.resolver.transport=wagon")
+        $ArgumentList.Add("-Dmaven.wagon.http.ssl.insecure=true")
+        $ArgumentList.Add("-Dmaven.wagon.http.ssl.allowall=true")
+        $ArgumentList.Add("-Dmaven.wagon.http.ssl.ignore.validity.dates=true")
     }
 }
 
@@ -298,7 +308,7 @@ function Set-ProxyEnvironment {
 
 function Add-ProxyEnvArgs {
     param(
-        [System.Collections.Generic.List[string]]$Args,
+        [System.Collections.Generic.List[string]]$ArgumentList,
         [string]$HttpProxy,
         [string]$HttpsProxy,
         [string]$NoProxy
@@ -313,8 +323,8 @@ function Add-ProxyEnvArgs {
         @("no_proxy", $NoProxy)
     )) {
         if (-not [string]::IsNullOrWhiteSpace($item[1])) {
-            $Args.Add("-e")
-            $Args.Add("$($item[0])=$($item[1])")
+            $ArgumentList.Add("-e")
+            $ArgumentList.Add("$($item[0])=$($item[1])")
         }
     }
 }
@@ -418,8 +428,8 @@ if ([string]::IsNullOrWhiteSpace($ProxyConfigFile)) {
     $ProxyConfigFile = Join-Path $projectRoot $ProxyConfigFile
 }
 Apply-ProxyConfigFile -ConfigFile $ProxyConfigFile
-$script:PodmanTlsVerify = ConvertTo-BooleanValue -Value $script:PodmanTlsVerify -Name "PodmanTlsVerify"
-$script:MavenTlsVerify = ConvertTo-BooleanValue -Value $script:MavenTlsVerify -Name "MavenTlsVerify"
+$script:ResolvedPodmanTlsVerify = ConvertTo-BooleanValue -Value $script:ConfiguredPodmanTlsVerify -Name "PodmanTlsVerify"
+$script:ResolvedMavenTlsVerify = ConvertTo-BooleanValue -Value $script:ConfiguredMavenTlsVerify -Name "MavenTlsVerify"
 
 if ([string]::IsNullOrWhiteSpace($MavenRepoDir)) {
     $mavenRepo = Join-Path $projectRoot "data\maven-repo"
@@ -444,7 +454,7 @@ if (-not $Offline) {
     foreach ($arg in @("pull", "--platform", "linux/amd64")) {
         $pullArgs.Add($arg)
     }
-    Add-PodmanTlsVerifyArg -Args $pullArgs
+    Add-PodmanTlsVerifyArg -ArgumentList $pullArgs
     $pullArgs.Add($MavenImage)
     Invoke-Podman -Arguments $pullArgs.ToArray()
 }
@@ -469,7 +479,7 @@ if ($SkipTests) {
 if ($Offline) {
     $mavenArgs.Add("-o")
 }
-Add-MavenTlsVerifyArgs -Args $mavenArgs
+Add-MavenTlsVerifyArgs -ArgumentList $mavenArgs
 
 $runArgs = [System.Collections.Generic.List[string]]::new()
 foreach ($arg in @(
@@ -482,7 +492,7 @@ foreach ($arg in @(
 )) {
     $runArgs.Add($arg)
 }
-Add-ProxyEnvArgs -Args $runArgs -HttpProxy $effectiveHttpProxy -HttpsProxy $effectiveHttpsProxy -NoProxy $NoProxy
+Add-ProxyEnvArgs -ArgumentList $runArgs -HttpProxy $effectiveHttpProxy -HttpsProxy $effectiveHttpsProxy -NoProxy $NoProxy
 $runArgs.Add($MavenImage)
 foreach ($arg in $mavenArgs.ToArray()) {
     $runArgs.Add($arg)

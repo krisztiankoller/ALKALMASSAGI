@@ -89,6 +89,21 @@ Maven dependency letoltesnel pedig ezekkel futtatja a Maven buildet:
 
 Biztonsagosabb hosszu tavu megoldas a ceges CA importalasa a Podman machine-be, de zart ceges proxy mogott a fenti kapcsolo gyors workaround lehet.
 
+A TLS kapcsolok JSON boolean es string formaban is mukodnek:
+
+```json
+{
+  "podmanTlsVerify": false,
+  "mavenTlsVerify": "false"
+}
+```
+
+Parancssorbol is elfogadott:
+
+```powershell
+-PodmanTlsVerify false -MavenTlsVerify false
+```
+
 Ezek a scriptek automatikusan olvassak:
 
 ```text
@@ -117,7 +132,7 @@ Vagy URL-be irt credentiallel:
 http://username:password@proxy.ceg.local:8080
 ```
 
-Ha a jelszo specialis karaktereket tartalmaz, a javasolt megoldas tovabbra is a kulon `username` es `password` mezok hasznalata a `proxy.config.json` fajlban. Igy nem kell URL-escape-elessel foglalkozni.
+Ha a jelszo specialis karaktereket tartalmaz, a javasolt megoldas tovabbra is a kulon `username` es `password` mezok hasznalata a `proxy.config.json` fajlban. Igy nem kell URL-escape-elessel foglalkozni. Ezeket a script automatikusan URL-encode-olja, mielott a proxy URL-be teszi, ezert a `DOMAIN\user`, `@`, `:`, `#`, `%` jellegu karakterek nem torik el a Podman/Maven proxy beallitast.
 
 Parancssori feluliras csak ideiglenes hibakereseshez van:
 
