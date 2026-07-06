@@ -13,6 +13,7 @@ param(
     [string]$NoProxy = "localhost,127.0.0.1,mssql,kafka,kafka-ui,sql-admin,app1,app2,app3,app4,app5,app6",
     [string]$ProxyUsername = "",
     [string]$ProxyPassword = "",
+    [string]$PodmanTlsVerify = "true",
     [switch]$SkipBuild,
     [switch]$SkipLogArchive,
     [Alias("h", "?")]
@@ -21,6 +22,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $script:InvocationBoundParameters = $PSBoundParameters
+$script:PodmanTlsVerify = $PodmanTlsVerify
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 
 function Show-Help {
@@ -80,6 +82,11 @@ Parameterek:
 
   -HttpProxy, -HttpsProxy, -NoProxy, -ProxyUsername, -ProxyPassword
       Ideiglenes proxy feluliras podman buildhez. Normal esetben proxy.config.json.
+
+  -PodmanTlsVerify
+      Podman registry TLS certificate ellenorzes podman build kozben. Alapertelmezett: true.
+      Ceges TLS inspection/x509 hiba eseten inkabb a proxy.config.json fajlban allitsd:
+      "podmanTlsVerify": false
 
   -SkipBuild
       Nem buildel image-et, csak mar letezo image-ekbol inditja a podokat.
@@ -142,6 +149,27 @@ function Ensure-Network {
     }
 }
 
+function ConvertTo-BooleanValue {
+    param(
+        [object]$Value,
+        [string]$Name
+    )
+
+    if ($Value -is [bool]) {
+        return $Value
+    }
+
+    $text = ([string]$Value).Trim()
+    if ($text -match "^(?i:true|1|yes|y|on)$") {
+        return $true
+    }
+    if ($text -match "^(?i:false|0|no|n|off)$") {
+        return $false
+    }
+
+    throw "Invalid boolean value for ${Name}: '$Value'. Use true or false."
+}
+
 function Apply-ProxyConfigFile {
     param(
         [string]$ConfigFile
@@ -155,6 +183,10 @@ function Apply-ProxyConfigFile {
     }
 
     $config = Get-Content -LiteralPath $ConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    if (-not $script:InvocationBoundParameters.ContainsKey("PodmanTlsVerify") -and
+        $config.PSObject.Properties.Name -contains "podmanTlsVerify") {
+        $script:PodmanTlsVerify = $config.podmanTlsVerify
+    }
     if ($null -eq $config -or $config.enabled -ne $true) {
         return
     }
@@ -198,6 +230,14 @@ function Resolve-ProxyUrl {
     }
 
     return $builder.Uri.AbsoluteUri
+}
+
+function Add-PodmanTlsVerifyArg {
+    param([System.Collections.Generic.List[string]]$Args)
+
+    if ($script:PodmanTlsVerify -eq $false) {
+        $Args.Add("--tls-verify=false")
+    }
 }
 
 function Set-ProxyEnvironment {
@@ -266,12 +306,40 @@ function Find-ServiceJar {
     return $jars[0].FullName
 }
 
+function Get-PodmanWslDistro {
+    if ($script:PodmanWslDistro) {
+        return $script:PodmanWslDistro
+    }
+
+    $distros = @(wsl.exe -l -q 2>$null |
+        ForEach-Object { ($_ -replace "`0", "").Trim() } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+
+    $distro = $distros | Where-Object { $_ -eq "podman-machine-default" } | Select-Object -First 1
+    if (-not $distro) {
+        $distro = $distros | Where-Object { $_ -like "podman-machine-*" } | Select-Object -First 1
+    }
+
+    if (-not $distro) {
+        throw "No Podman WSL distro was found. Run these first: podman machine init; podman machine start. Then check: podman machine list; wsl -l -v"
+    }
+
+    $script:PodmanWslDistro = $distro
+    return $script:PodmanWslDistro
+}
+
 function ConvertTo-WslPath {
     param([string]$Path)
 
     $resolvedPath = (Resolve-Path -LiteralPath $Path).Path
-    $wslPath = wsl -d podman-machine-default -- wslpath -a $resolvedPath
-    return ($wslPath | Select-Object -First 1).Trim()
+    $root = [System.IO.Path]::GetPathRoot($resolvedPath)
+    if ([string]::IsNullOrWhiteSpace($root) -or $root.Length -lt 2 -or $root[1] -ne ":") {
+        throw "Only local drive paths can be mounted into the Podman WSL machine. Path: $resolvedPath"
+    }
+
+    $drive = ([string]$root[0]).ToLowerInvariant()
+    $relativePath = $resolvedPath.Substring($root.Length).Replace("\", "/")
+    return "/mnt/$drive/$relativePath"
 }
 
 function Save-PodLogs {
@@ -363,6 +431,7 @@ if (-not (Test-Path -LiteralPath $Containerfile)) {
 }
 
 Apply-ProxyConfigFile -ConfigFile $ProxyConfigFile
+$script:PodmanTlsVerify = ConvertTo-BooleanValue -Value $script:PodmanTlsVerify -Name "PodmanTlsVerify"
 
 $effectiveHttpProxy = Resolve-ProxyUrl -Url $HttpProxy -Username $ProxyUsername -Password $ProxyPassword
 $effectiveHttpsProxy = Resolve-ProxyUrl -Url $(if ([string]::IsNullOrWhiteSpace($HttpsProxy)) { $HttpProxy } else { $HttpsProxy }) -Username $ProxyUsername -Password $ProxyPassword
@@ -424,6 +493,7 @@ foreach ($service in $services) {
         )) {
             $buildArgs.Add($arg)
         }
+        Add-PodmanTlsVerifyArg -Args $buildArgs
         Add-ProxyBuildArgs -Args $buildArgs -HttpProxy $effectiveHttpProxy -HttpsProxy $effectiveHttpsProxy -NoProxy $NoProxy
         $buildArgs.Add($buildDir)
         & podman @($buildArgs.ToArray())

@@ -13,7 +13,7 @@ param(
     [string]$NoProxy = "localhost,127.0.0.1,mssql,kafka,kafka-ui,sql-admin,app1,app2,app3,app4,app5,app6",
     [string]$ProxyUsername = "",
     [string]$ProxyPassword = "",
-    [bool]$PodmanTlsVerify = $true,
+    [string]$PodmanTlsVerify = "true",
     [switch]$SkipBuild,
     [switch]$SkipLogArchive,
     [Alias("h", "?")]
@@ -149,6 +149,27 @@ function Ensure-Network {
     }
 }
 
+function ConvertTo-BooleanValue {
+    param(
+        [object]$Value,
+        [string]$Name
+    )
+
+    if ($Value -is [bool]) {
+        return $Value
+    }
+
+    $text = ([string]$Value).Trim()
+    if ($text -match "^(?i:true|1|yes|y|on)$") {
+        return $true
+    }
+    if ($text -match "^(?i:false|0|no|n|off)$") {
+        return $false
+    }
+
+    throw "Invalid boolean value for ${Name}: '$Value'. Use true or false."
+}
+
 function Apply-ProxyConfigFile {
     param(
         [string]$ConfigFile
@@ -164,7 +185,7 @@ function Apply-ProxyConfigFile {
     $config = Get-Content -LiteralPath $ConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
     if (-not $script:InvocationBoundParameters.ContainsKey("PodmanTlsVerify") -and
         $config.PSObject.Properties.Name -contains "podmanTlsVerify") {
-        $script:PodmanTlsVerify = [System.Convert]::ToBoolean($config.podmanTlsVerify)
+        $script:PodmanTlsVerify = $config.podmanTlsVerify
     }
     if ($null -eq $config -or $config.enabled -ne $true) {
         return
@@ -410,6 +431,7 @@ if (-not (Test-Path -LiteralPath $Containerfile)) {
 }
 
 Apply-ProxyConfigFile -ConfigFile $ProxyConfigFile
+$script:PodmanTlsVerify = ConvertTo-BooleanValue -Value $script:PodmanTlsVerify -Name "PodmanTlsVerify"
 
 $effectiveHttpProxy = Resolve-ProxyUrl -Url $HttpProxy -Username $ProxyUsername -Password $ProxyPassword
 $effectiveHttpsProxy = Resolve-ProxyUrl -Url $(if ([string]::IsNullOrWhiteSpace($HttpsProxy)) { $HttpProxy } else { $HttpsProxy }) -Username $ProxyUsername -Password $ProxyPassword
