@@ -34,6 +34,7 @@ Ezt kell kitolteni. Pelda:
   "httpsProxy": "http://proxy.ceg.local:8080",
   "username": "DOMAIN\\user",
   "password": "secret",
+  "podmanTlsVerify": true,
   "noProxy": [
     "localhost",
     "127.0.0.1",
@@ -53,6 +54,28 @@ Ezt kell kitolteni. Pelda:
 ```
 
 Ha `enabled` erteke `false`, akkor a scriptek nem hasznalnak proxyt.
+
+Ha a ceges proxy/TLS inspection miatt a Podman image letoltes ilyen hibaval all meg:
+
+```text
+tls: failed to verify certificate: x509
+```
+
+akkor ideiglenesen allithato:
+
+```json
+{
+  "podmanTlsVerify": false
+}
+```
+
+Ez a scriptekben a Podman `pull` es `build` parancsokhoz ezt adja hozza:
+
+```text
+--tls-verify=false
+```
+
+Biztonsagosabb hosszu tavu megoldas a ceges CA importalasa a Podman machine-be, de zart ceges proxy mogott a fenti kapcsolo gyors workaround lehet.
 
 Ezek a scriptek automatikusan olvassak:
 

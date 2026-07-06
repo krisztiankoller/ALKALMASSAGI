@@ -20,6 +20,7 @@ param(
     [string]$NoProxy = "localhost,127.0.0.1,mssql,kafka,kafka-ui,sql-admin,app1,app2,app3,app4,app5,app6",
     [string]$ProxyUsername = "",
     [string]$ProxyPassword = "",
+    [bool]$PodmanTlsVerify = $true,
     [switch]$SkipJavaBuild,
     [switch]$SkipTests,
     [switch]$OfflineJavaBuild,
@@ -29,6 +30,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $script:InvocationBoundParameters = $PSBoundParameters
+$script:PodmanTlsVerify = $PodmanTlsVerify
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 
 function Show-Help {
@@ -109,6 +111,11 @@ Parameterek:
 
   -HttpProxy, -HttpsProxy, -NoProxy, -ProxyUsername, -ProxyPassword
       Ideiglenes proxy feluliras. Normal esetben a proxy.config.json hasznalando.
+
+  -PodmanTlsVerify
+      Podman registry TLS certificate ellenorzes pull/build kozben. Alapertelmezett: true.
+      Ceges TLS inspection/x509 hiba eseten inkabb a proxy.config.json fajlban allitsd:
+      "podmanTlsVerify": false
 
   -SkipJavaBuild
       Nem futtat Maven buildet. Akkor hasznald, ha a JAR-ok mar keszek.
@@ -213,6 +220,10 @@ function Apply-ProxyConfigFile {
     }
 
     $config = Get-Content -LiteralPath $ConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    if (-not $script:InvocationBoundParameters.ContainsKey("PodmanTlsVerify") -and
+        $config.PSObject.Properties.Name -contains "podmanTlsVerify") {
+        $script:PodmanTlsVerify = [System.Convert]::ToBoolean($config.podmanTlsVerify)
+    }
     if ($null -eq $config -or $config.enabled -ne $true) {
         return
     }
@@ -256,6 +267,26 @@ function Resolve-ProxyUrl {
     }
 
     return $builder.Uri.AbsoluteUri
+}
+
+function Add-PodmanTlsVerifyArg {
+    param([System.Collections.Generic.List[string]]$Args)
+
+    if ($script:PodmanTlsVerify -eq $false) {
+        $Args.Add("--tls-verify=false")
+    }
+}
+
+function Invoke-PodmanPull {
+    param([string]$Image)
+
+    $pullArgs = [System.Collections.Generic.List[string]]::new()
+    foreach ($arg in @("pull", "--platform", "linux/amd64")) {
+        $pullArgs.Add($arg)
+    }
+    Add-PodmanTlsVerifyArg -Args $pullArgs
+    $pullArgs.Add($Image)
+    Invoke-Podman -Arguments $pullArgs.ToArray()
 }
 
 function Set-ProxyEnvironment {
@@ -358,6 +389,7 @@ function Build-ServiceImage {
     )) {
         $buildArgs.Add($arg)
     }
+    Add-PodmanTlsVerifyArg -Args $buildArgs
     Add-ProxyBuildArgs -Args $buildArgs -HttpProxy $script:EffectiveHttpProxy -HttpsProxy $script:EffectiveHttpsProxy -NoProxy $script:EffectiveNoProxy
     $buildArgs.Add($buildDir)
 
@@ -456,15 +488,15 @@ foreach ($service in $services) {
     $images.Add($imageTag)
 }
 
-Invoke-Podman -Arguments @("pull", "--platform", "linux/amd64", $SqlImage)
-Invoke-Podman -Arguments @("pull", "--platform", "linux/amd64", $KafkaImage)
-Invoke-Podman -Arguments @("pull", "--platform", "linux/amd64", $KafkaUiImage)
-Invoke-Podman -Arguments @("pull", "--platform", "linux/amd64", $SqlAdminImage)
-Invoke-Podman -Arguments @("pull", "--platform", "linux/amd64", $LogViewerImage)
-Invoke-Podman -Arguments @("pull", "--platform", "linux/amd64", $NifiImage)
-Invoke-Podman -Arguments @("pull", "--platform", "linux/amd64", $BaseJavaImage)
+Invoke-PodmanPull -Image $SqlImage
+Invoke-PodmanPull -Image $KafkaImage
+Invoke-PodmanPull -Image $KafkaUiImage
+Invoke-PodmanPull -Image $SqlAdminImage
+Invoke-PodmanPull -Image $LogViewerImage
+Invoke-PodmanPull -Image $NifiImage
+Invoke-PodmanPull -Image $BaseJavaImage
 if (-not $OfflineJavaBuild) {
-    Invoke-Podman -Arguments @("pull", "--platform", "linux/amd64", $MavenImage)
+    Invoke-PodmanPull -Image $MavenImage
 }
 
 Remove-Item -LiteralPath $BundleDir -Recurse -Force -ErrorAction SilentlyContinue

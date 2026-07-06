@@ -13,6 +13,7 @@ param(
     [string]$NoProxy = "localhost,127.0.0.1,mssql,kafka,kafka-ui,sql-admin,app1,app2,app3,app4,app5,app6",
     [string]$ProxyUsername = "",
     [string]$ProxyPassword = "",
+    [bool]$PodmanTlsVerify = $true,
     [switch]$SkipBuild,
     [switch]$SkipLogArchive,
     [Alias("h", "?")]
@@ -21,6 +22,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $script:InvocationBoundParameters = $PSBoundParameters
+$script:PodmanTlsVerify = $PodmanTlsVerify
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 
 function Show-Help {
@@ -80,6 +82,11 @@ Parameterek:
 
   -HttpProxy, -HttpsProxy, -NoProxy, -ProxyUsername, -ProxyPassword
       Ideiglenes proxy feluliras podman buildhez. Normal esetben proxy.config.json.
+
+  -PodmanTlsVerify
+      Podman registry TLS certificate ellenorzes podman build kozben. Alapertelmezett: true.
+      Ceges TLS inspection/x509 hiba eseten inkabb a proxy.config.json fajlban allitsd:
+      "podmanTlsVerify": false
 
   -SkipBuild
       Nem buildel image-et, csak mar letezo image-ekbol inditja a podokat.
@@ -155,6 +162,10 @@ function Apply-ProxyConfigFile {
     }
 
     $config = Get-Content -LiteralPath $ConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    if (-not $script:InvocationBoundParameters.ContainsKey("PodmanTlsVerify") -and
+        $config.PSObject.Properties.Name -contains "podmanTlsVerify") {
+        $script:PodmanTlsVerify = [System.Convert]::ToBoolean($config.podmanTlsVerify)
+    }
     if ($null -eq $config -or $config.enabled -ne $true) {
         return
     }
@@ -198,6 +209,14 @@ function Resolve-ProxyUrl {
     }
 
     return $builder.Uri.AbsoluteUri
+}
+
+function Add-PodmanTlsVerifyArg {
+    param([System.Collections.Generic.List[string]]$Args)
+
+    if ($script:PodmanTlsVerify -eq $false) {
+        $Args.Add("--tls-verify=false")
+    }
 }
 
 function Set-ProxyEnvironment {
@@ -452,6 +471,7 @@ foreach ($service in $services) {
         )) {
             $buildArgs.Add($arg)
         }
+        Add-PodmanTlsVerifyArg -Args $buildArgs
         Add-ProxyBuildArgs -Args $buildArgs -HttpProxy $effectiveHttpProxy -HttpsProxy $effectiveHttpsProxy -NoProxy $NoProxy
         $buildArgs.Add($buildDir)
         & podman @($buildArgs.ToArray())

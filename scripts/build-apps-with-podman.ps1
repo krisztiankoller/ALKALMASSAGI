@@ -9,6 +9,7 @@ param(
     [string]$NoProxy = "localhost,127.0.0.1,mssql,kafka,kafka-ui,sql-admin,app1,app2,app3,app4,app5,app6",
     [string]$ProxyUsername = "",
     [string]$ProxyPassword = "",
+    [bool]$PodmanTlsVerify = $true,
     [switch]$SkipTests,
     [switch]$Offline,
     [switch]$KeepBuildContainer,
@@ -18,6 +19,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $script:InvocationBoundParameters = $PSBoundParameters
+$script:PodmanTlsVerify = $PodmanTlsVerify
 
 function Show-Help {
     @'
@@ -64,6 +66,11 @@ Fontos parameterek:
 
   -HttpProxy, -HttpsProxy, -NoProxy, -ProxyUsername, -ProxyPassword
       Ideiglenes parancssori proxy feluliras. Normal esetben a proxy.config.json hasznalando.
+
+  -PodmanTlsVerify
+      Podman registry TLS certificate ellenorzes. Alapertelmezett: true.
+      Ceges TLS inspection/x509 hiba eseten inkabb a proxy.config.json fajlban allitsd:
+      "podmanTlsVerify": false
 
   -SkipTests
       Maven tesztek kihagyasa: -DskipTests.
@@ -168,6 +175,10 @@ function Apply-ProxyConfigFile {
     }
 
     $config = Get-Content -LiteralPath $ConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    if (-not $script:InvocationBoundParameters.ContainsKey("PodmanTlsVerify") -and
+        $config.PSObject.Properties.Name -contains "podmanTlsVerify") {
+        $script:PodmanTlsVerify = [System.Convert]::ToBoolean($config.podmanTlsVerify)
+    }
     if ($null -eq $config -or $config.enabled -ne $true) {
         return
     }
@@ -211,6 +222,14 @@ function Resolve-ProxyUrl {
     }
 
     return $builder.Uri.AbsoluteUri
+}
+
+function Add-PodmanTlsVerifyArg {
+    param([System.Collections.Generic.List[string]]$Args)
+
+    if ($script:PodmanTlsVerify -eq $false) {
+        $Args.Add("--tls-verify=false")
+    }
 }
 
 function Set-ProxyEnvironment {
@@ -376,7 +395,13 @@ $projectRootWsl = ConvertTo-WslPath $projectRoot
 $mavenRepoWsl = ConvertTo-WslPath $mavenRepo
 
 if (-not $Offline) {
-    Invoke-Podman -Arguments @("pull", "--platform", "linux/amd64", $MavenImage)
+    $pullArgs = [System.Collections.Generic.List[string]]::new()
+    foreach ($arg in @("pull", "--platform", "linux/amd64")) {
+        $pullArgs.Add($arg)
+    }
+    Add-PodmanTlsVerifyArg -Args $pullArgs
+    $pullArgs.Add($MavenImage)
+    Invoke-Podman -Arguments $pullArgs.ToArray()
 }
 
 & podman pod exists $BuildPodName *> $null
