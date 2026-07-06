@@ -24,6 +24,8 @@ param(
     [string]$MavenTlsVerify = "true",
     [int]$PodmanPullRetries = 5,
     [int]$PodmanPullRetryDelaySeconds = 10,
+    [int]$MavenBuildRetries = 5,
+    [int]$MavenBuildRetryDelaySeconds = 10,
     [switch]$SkipJavaBuild,
     [switch]$SkipTests,
     [switch]$OfflineJavaBuild,
@@ -116,6 +118,12 @@ Parameterek:
       Maven/Java HTTPS certificate ellenorzes dependency letoltes kozben. Alapertelmezett: true.
       Ceges TLS inspection vagy ismeretlen CA hiba eseten inkabb a proxy.config.json fajlban allitsd:
       "mavenTlsVerify": false
+  -MavenBuildRetries
+      Maven build probalkozasok szama. Alapertelmezett: 5
+      Ha gyors hibaval megallast akarsz, allithato 1-re.
+  -MavenBuildRetryDelaySeconds
+      Varakozas ket sikertelen Maven build probalkozas kozott masodpercben.
+      Alapertelmezett: 10
   -SkipJavaBuild
       Nem futtat Maven buildet. Akkor hasznald, ha a JAR-ok mar keszek.
   -SkipTests
@@ -500,7 +508,9 @@ if (-not $SkipJavaBuild) {
         "-BuildPodName", $BuildPodName,
         "-ProxyConfigFile", $ProxyConfigFile,
         "-PodmanPullRetries", $PodmanPullRetries,
-        "-PodmanPullRetryDelaySeconds", $PodmanPullRetryDelaySeconds
+        "-PodmanPullRetryDelaySeconds", $PodmanPullRetryDelaySeconds,
+        "-MavenBuildRetries", $MavenBuildRetries,
+        "-MavenBuildRetryDelaySeconds", $MavenBuildRetryDelaySeconds
     )
     if ($SkipTests) {
         $javaBuildArgs += "-SkipTests"

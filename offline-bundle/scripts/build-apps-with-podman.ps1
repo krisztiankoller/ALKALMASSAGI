@@ -15,6 +15,8 @@ param(
     [string]$MavenTlsVerify = "true",
     [int]$PodmanPullRetries = 5,
     [int]$PodmanPullRetryDelaySeconds = 10,
+    [int]$MavenBuildRetries = 5,
+    [int]$MavenBuildRetryDelaySeconds = 10,
     [switch]$SkipTests,
     [switch]$Offline,
     [switch]$KeepBuildContainer,
@@ -85,6 +87,12 @@ Fontos parameterek:
       Maven/Java HTTPS certificate ellenorzes dependency letoltes kozben. Alapertelmezett: true.
       Ceges TLS inspection vagy ismeretlen CA hiba eseten inkabb a proxy.config.json fajlban allitsd:
       "mavenTlsVerify": false
+  -MavenBuildRetries
+      Maven build probalkozasok szama. Alapertelmezett: 5
+      Ha gyors hibaval megallast akarsz, allithato 1-re.
+  -MavenBuildRetryDelaySeconds
+      Varakozas ket sikertelen Maven build probalkozas kozott masodpercben.
+      Alapertelmezett: 10
   -SkipTests
       Maven tesztek kihagyasa: -DskipTests.
   -Offline
@@ -542,14 +550,31 @@ $runArgs.Add($MavenImage)
 foreach ($arg in $mavenArgs.ToArray()) {
     $runArgs.Add($arg)
 }
-try {
-    Invoke-PodmanWithLog -Arguments $runArgs.ToArray() -LogPath $currentBuildLog
-}
-catch {
-    if (-not $DisableBuildLogViewer) {
-        Start-BuildLogViewer -ContainerName $BuildLogViewerContainerName -PodName $BuildPodName -Image $MavenImage -BuildLogDirWsl $buildLogDirWsl
+$mavenAttempts = [Math]::Max(1, $MavenBuildRetries)
+$mavenRetryDelaySeconds = [Math]::Max(0, $MavenBuildRetryDelaySeconds)
+for ($attempt = 1; $attempt -le $mavenAttempts; $attempt++) {
+    try {
+        Write-Output "Running Maven build (attempt $attempt/$mavenAttempts)..."
+        Invoke-PodmanWithLog -Arguments $runArgs.ToArray() -LogPath $currentBuildLog
+        break
     }
-    throw
+    catch {
+        if ($attempt -ge $mavenAttempts) {
+            if (-not $DisableBuildLogViewer) {
+                Start-BuildLogViewer -ContainerName $BuildLogViewerContainerName -PodName $BuildPodName -Image $MavenImage -BuildLogDirWsl $buildLogDirWsl
+            }
+            throw "Maven build failed after $mavenAttempts attempt(s). Last error: $($_.Exception.Message)"
+        }
+
+        Write-Warning "Maven build failed on attempt $attempt/$mavenAttempts. Retrying in $mavenRetryDelaySeconds seconds. Error: $($_.Exception.Message)"
+        & podman container exists $BuildContainerName *> $null
+        if ($LASTEXITCODE -eq 0) {
+            Invoke-Podman -Arguments @("rm", "-f", $BuildContainerName)
+        }
+        if ($mavenRetryDelaySeconds -gt 0) {
+            Start-Sleep -Seconds $mavenRetryDelaySeconds
+        }
+    }
 }
 if (-not $KeepBuildContainer) {
     Invoke-Podman -Arguments @("rm", $BuildContainerName)

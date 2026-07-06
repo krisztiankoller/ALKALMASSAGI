@@ -296,6 +296,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-offline.ps1 `
 
 - elinditja a `java-build-pod` build podot;
 - a Maven builder image explicit `podman pull` muveletet alapbol 5-szor probalja;
+- a `mvn clean package` futast is alapbol 5-szor probalja, ha Maven/proxy
+  letoltesi hiba miatt megallna, de `-MavenBuildRetries 1` kapcsoloval
+  egy probalkozasra allithato;
 - Maven/JDK kontenerrel forditja az `app1` - `app6` modulokat;
 - a Maven cache-t a projekt alatt tartja: `data\maven-repo`;
 - a build logot a projekt alatt tartja: `data\build-logs\current.log`;

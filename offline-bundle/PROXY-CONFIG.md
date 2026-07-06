@@ -83,6 +83,11 @@ probaljak meg, mielott hibaval megallnak. Ez proxy vagy instabil halozat mogott
 hasznos, mert egy rovid registry/proxy hiba nem allitja meg azonnal az exportot.
 Ehhez normal esetben nem kell semmilyen extra parameter.
 
+A Maven build (`mvn clean package`) is alapbol 5 probalkozast kap. Ez akkor
+hasznos, ha a Maven repository vagy a proxy idonkent szakadozik. Ehhez sem kell
+kulon parametert megadni normal esetben. Ha gyors hibaval megallast akarsz,
+beallithatod 1 probalkozasra: `-MavenBuildRetries 1`.
+
 Pelda tobb mint 5 probalkozas beallitasara:
 
 ```powershell
@@ -90,7 +95,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\export-offline-bun
   -ServicesFile .\services.json `
   -SkipTests `
   -PodmanPullRetries 8 `
-  -PodmanPullRetryDelaySeconds 15
+  -PodmanPullRetryDelaySeconds 15 `
+  -MavenBuildRetries 8 `
+  -MavenBuildRetryDelaySeconds 15
+```
+
+Pelda gyors Maven hibara, retry nelkul:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-apps-with-podman.ps1 `
+  -SkipTests `
+  -MavenBuildRetries 1
 ```
 
 Az app image Containerfile nem telepit csomagot `apk add`-dal, ezert az app image

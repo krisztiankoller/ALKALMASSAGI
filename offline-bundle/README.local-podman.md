@@ -61,6 +61,9 @@ Explicit `podman pull` operations in the build/export scripts are retried 5
 times by default before the script stops; no extra parameter is needed for this.
 Use `-PodmanPullRetries` only if you want more than 5 attempts, and
 `-PodmanPullRetryDelaySeconds` only if you want a different delay.
+The Maven build itself is also retried 5 times by default, so transient Maven
+repository/proxy failures do not stop the build immediately. Unlike Podman
+pull retries, Maven build retries can be lowered to 1 with `-MavenBuildRetries 1`.
 
 ## Full rebuild and start order
 
@@ -193,6 +196,8 @@ The Maven cache stays inside this project folder at `data\maven-repo`.
 The current build log stays inside this project folder at `data\build-logs\current.log`.
 The script also starts `java-build-log-viewer`, so the same build log is visible in Dozzle at http://localhost:40004.
 The Maven builder image pull is retried 5 times by default.
+The `mvn clean package` execution is retried 5 times by default too, but it can
+be lowered to one attempt with `-MavenBuildRetries 1`.
 
 If internet is available only through an authenticated proxy, fill `proxy.config.json` once and keep the same build command. Details: `PROXY-CONFIG.md`.
 
