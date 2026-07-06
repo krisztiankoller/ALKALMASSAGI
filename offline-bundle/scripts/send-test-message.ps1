@@ -1,6 +1,8 @@
 param(
     [string]$Topic = "app1.source",
     [string]$Message = "hello-from-podman",
+    [string]$KafkaCliImage = "apache/kafka:3.9.0",
+    [string]$NetworkName = "devnet",
     [Alias("h", "?")]
     [switch]$Help
 )
@@ -31,7 +33,7 @@ Egyedi topic:
     -Message "teszt-001"
 
 Mit csinal:
-  1. podman exec paranccsal belep a kafka kontenerbe.
+  1. Elindit egy rovid eletu Kafka CLI kontenert a devnet networkon.
   2. A kafka-console-producer.sh eszkozzel elkuldi az uzenetet.
   3. Kiirja, melyik topicra mit kuldott.
 
@@ -41,6 +43,14 @@ Parameterek:
 
   -Message
       Elkuldo szoveges uzenet. Alapertelmezett: hello-from-podman
+
+  -KafkaCliImage
+      Kafka CLI eszkozoket tartalmazo image. Alapertelmezett: apache/kafka:3.9.0
+      Erre azert van szukseg, mert az apache/kafka-native broker image-ben
+      nincsenek benne a kafka-console-* parancsok.
+
+  -NetworkName
+      Podman network neve, amelyen a kafka broker elerheto. Alapertelmezett: devnet
 
   --help
       Ezt a reszletes leirast irja ki es nem kuld uzenetet.
@@ -63,7 +73,11 @@ if ($Help) {
 
 $escapedMessage = $Message.Replace("'", "'\''")
 $escapedTopic = $Topic.Replace("'", "'\''")
+$escapedBootstrap = "kafka:9092"
 
-podman exec kafka /bin/sh -lc "printf '%s\n' '$escapedMessage' | /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server localhost:9092 --topic '$escapedTopic'"
+podman run --rm --network $NetworkName $KafkaCliImage /bin/sh -lc "printf '%s\n' '$escapedMessage' | /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server '$escapedBootstrap' --topic '$escapedTopic'"
+if ($LASTEXITCODE -ne 0) {
+    throw "Could not send Kafka test message with image '$KafkaCliImage'. Make sure the image is available offline or can be pulled."
+}
 
 Write-Output "Sent message to topic '$Topic': $Message"

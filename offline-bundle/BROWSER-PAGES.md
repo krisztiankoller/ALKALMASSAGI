@@ -9,6 +9,7 @@ Ez a projekt helyi bongeszoben hasznos oldalainak rovid listaja.
   - Bal oldali `Connections` listaban ezek a fontos kapcsolatok vannak:
     `Local MSSQL`, `app1_audit`, `app2_audit`, `app3_audit`, `app4_audit`, `app5_audit`, `app6_audit`.
   - Az app adatbazisokban az `audit_events` tabla mutatja, mit vett at es mit kuldott tovabb az adott app.
+  - Windowsos SQL kliensbol ugyanezt az MSSQL szervert igy ered el: `localhost,40000`, user `sa`, password `Alkalmassagi_2026!`, `Trust server certificate` bekapcsolva.
 
 - [Kafka UI - dashboard](http://localhost:40002)
   - Jelszo nelkul nyilik.
@@ -66,6 +67,7 @@ Nyisd meg ezt a fajlt bongeszoben, ha kattinthato linkgyujtemenyt szeretnel:
 - `README.local-podman.md` - rovid helyi stack osszefoglalo.
 - `PROXY-CONFIG.md` - egyetlen `proxy.config.json` fajlos proxy beallitas.
 - `PORT-CONFIG.md` - portok atallitasa.
+- `SQL-SERVER-CONNECTION.md` - MSSQL csatlakozas Windowsrol, kontenerbol es DbGate-bol.
 - `SCRIPT-STRUCTURE.md` - `scripts` es `scripts/private` konyvtarak szerepe.
 - `LOG-VIEWER.md` - webes kontener log nezegeto Dozzle alapon.
 - `LOG-PERSISTENCE.md` - logok megorzese ujrainditas es pod ujraletrehozas elott.

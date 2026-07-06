@@ -53,6 +53,19 @@ http://localhost:40004  Log viewer
 http://localhost:40011/nifi  Apache NiFi
 ```
 
+SQL Server from the Windows host:
+
+```text
+Server: localhost,40000
+User: sa
+Password: the value passed with -SqlPassword
+Trust server certificate: yes
+```
+
+For the default examples in this repository, the password is
+`Alkalmassagi_2026!`. See `SQL-SERVER-CONNECTION.md` for SSMS, Azure Data
+Studio, connection string, DbGate and container-side examples.
+
 Every script supports detailed help:
 
 ```powershell
@@ -67,6 +80,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-offline.ps1 --
 - The Dozzle log viewer image is included in the image archive for browser-based container logs.
 - The Apache NiFi image is included for file-to-Kafka upload flows generated from `nifi-flows.yaml`.
 - For GitHub publishing and the special `all` branch layout, see `GITHUB-PUBLISH.md`.
-- Start with `start.md`. For script layout use `SCRIPT-STRUCTURE.md`; for log viewer details use `LOG-VIEWER.md`; for NiFi file upload use `NIFI-FILE-TO-KAFKA.md`; for saved log behavior use `LOG-PERSISTENCE.md`; for authenticated proxy setup use `PROXY-CONFIG.md`; for port changes use `PORT-CONFIG.md`; for REST/SOAP/JKS examples use `REST-SOAP-SECURITY-EXAMPLES.md`; for adding a new app use `ADD-NEW-APP.md`.
+- Start with `start.md`. For SQL Server connection details use `SQL-SERVER-CONNECTION.md`; for script layout use `SCRIPT-STRUCTURE.md`; for log viewer details use `LOG-VIEWER.md`; for NiFi file upload use `NIFI-FILE-TO-KAFKA.md`; for saved log behavior use `LOG-PERSISTENCE.md`; for authenticated proxy setup use `PROXY-CONFIG.md`; for port changes use `PORT-CONFIG.md`; for REST/SOAP/JKS examples use `REST-SOAP-SECURITY-EXAMPLES.md`; for adding a new app use `ADD-NEW-APP.md`.
 - If you also need existing database data, export/import SQL backups separately.
 - Keep the same service names in `services.json`; they become DNS names on the `devnet` network.

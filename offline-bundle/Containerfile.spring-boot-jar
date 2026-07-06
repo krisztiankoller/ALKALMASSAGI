@@ -4,7 +4,7 @@ ARG APK_INSECURE_TLS=false
 
 WORKDIR /app
 
-RUN if [ "$APK_INSECURE_TLS" = "true" ]; then apk add --no-cache --no-check-certificate curl; else apk add --no-cache curl; fi
+RUN if [ "$APK_INSECURE_TLS" = "true" ]; then apk add --no-cache --no-check-certificate wget; else apk add --no-cache wget; fi
 
 COPY app.jar /app/app.jar
 

@@ -58,6 +58,18 @@ spring:
 
 Kulsos SQL Serverhez itt kell atirni a hostot, portot, adatbazist es TLS beallitasokat.
 
+Fontos kulonbseg:
+
+```text
+Podman kontenerbol: mssql:1433
+Windows hostrol: localhost,40000
+```
+
+Az appok `application.yaml` fajljaiban alapbol a konteneres `mssql:1433`
+kapcsolat legyen, mert az appok podban futnak. SSMS, Azure Data Studio vagy mas
+Windowsos SQL kliens eseten a host portot kell hasznalni: `localhost,40000`.
+Reszletek: `SQL-SERVER-CONNECTION.md`.
+
 ### Kafka
 
 ```yaml

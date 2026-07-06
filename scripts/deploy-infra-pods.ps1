@@ -144,6 +144,7 @@ $KafkaData = Join-Path $DataRoot "kafka"
 $CloudBeaverData = Join-Path $DataRoot "cloudbeaver"
 $NifiData = Join-Path $DataRoot "nifi"
 $NifiConf = Join-Path $NifiData "conf"
+$NifiTemplateProperties = Join-Path $ProjectRoot "config\nifi\nifi.properties"
 $NifiDropData = Join-Path $NifiData "drop"
 $NifiLogs = Join-Path $NifiData "logs"
 $NifiDatabaseRepository = Join-Path $NifiData "database_repository"
@@ -369,7 +370,7 @@ function Get-ServiceNames {
 
 function Add-DbGateConnectionEnv {
     param(
-        [System.Collections.Generic.List[string]]$Args,
+        [System.Collections.Generic.List[string]]$PodmanArgs,
         [string]$Key,
         [string]$Label,
         [string]$Database,
@@ -387,22 +388,25 @@ function Add-DbGateConnectionEnv {
         @("AUTH_TYPE_$Key", "tedious"),
         @("SSL_TRUST_CERTIFICATE_$Key", "1")
     )) {
-        $Args.Add("-e")
-        $Args.Add("$($item[0])=$($item[1])")
+        $PodmanArgs.Add("-e")
+        $PodmanArgs.Add("$($item[0])=$($item[1])")
     }
 }
 
 function Sync-NifiConfigurationData {
     param(
         [string]$ConfPath,
-        [string]$NifiImage
+        [string]$NifiImage,
+        [string]$TemplatePropertiesPath
     )
 
     $nifiPropertiesPath = Join-Path $ConfPath "nifi.properties"
     podman container exists nifi 2>$null
     if ($LASTEXITCODE -eq 0) {
         podman cp "nifi:/opt/nifi/nifi-current/conf/." $ConfPath | Out-Null
-        return
+        if (Test-Path -LiteralPath $nifiPropertiesPath) {
+            return
+        }
     }
 
     if (Test-Path -LiteralPath $nifiPropertiesPath) {
@@ -416,6 +420,14 @@ function Sync-NifiConfigurationData {
     }
     finally {
         podman rm -f $tempContainerName 2>$null | Out-Null
+    }
+
+    if (-not (Test-Path -LiteralPath $nifiPropertiesPath) -and (Test-Path -LiteralPath $TemplatePropertiesPath)) {
+        Copy-Item -LiteralPath $TemplatePropertiesPath -Destination $nifiPropertiesPath -Force
+    }
+
+    if (-not (Test-Path -LiteralPath $nifiPropertiesPath)) {
+        throw "Could not create NiFi properties file: $nifiPropertiesPath. Check that image '$NifiImage' contains /opt/nifi/nifi-current/conf/nifi.properties."
     }
 }
 
@@ -478,7 +490,7 @@ foreach ($path in @(
 )) {
     New-Item -ItemType Directory -Force -Path $path | Out-Null
 }
-Sync-NifiConfigurationData -ConfPath $NifiConf -NifiImage $NifiImage
+Sync-NifiConfigurationData -ConfPath $NifiConf -NifiImage $NifiImage -TemplatePropertiesPath $NifiTemplateProperties
 Set-NifiUnsecuredConfiguration -ConfPath $NifiConf -SensitivePropsKey "AlkalmassagiLocalOnlyKey2026"
 Ensure-CloudBeaverConfiguration -WorkspacePath $CloudBeaverData -SqlPassword $SqlPassword
 
@@ -572,14 +584,16 @@ foreach ($arg in @(
     "--pod", "sql-admin-pod",
     "--name", "sql-admin",
     "-e", "SKIP_ALL_AUTH=1",
+    "-e", "NODE_TLS_REJECT_UNAUTHORIZED=0",
+    "-e", "NODE_TL_REJECT_UNAUTHORIZED=0",
     "-e", "CONNECTIONS=mssql,$($ServiceNames -join ',')"
 )) {
     $sqlAdminArgs.Add($arg)
 }
 
-Add-DbGateConnectionEnv -Args $sqlAdminArgs -Key "mssql" -Label "Local MSSQL" -Database "master" -SqlPassword $SqlPassword
+Add-DbGateConnectionEnv -PodmanArgs $sqlAdminArgs -Key "mssql" -Label "Local MSSQL" -Database "master" -SqlPassword $SqlPassword
 foreach ($serviceName in $ServiceNames) {
-    Add-DbGateConnectionEnv -Args $sqlAdminArgs -Key $serviceName -Label "${serviceName}_audit" -Database "${serviceName}_audit" -SqlPassword $SqlPassword
+    Add-DbGateConnectionEnv -PodmanArgs $sqlAdminArgs -Key $serviceName -Label "${serviceName}_audit" -Database "${serviceName}_audit" -SqlPassword $SqlPassword
 }
 
 $sqlAdminArgs.Add("-v")

@@ -143,7 +143,18 @@ if (-not (Test-Path -LiteralPath $servicesFile)) {
     throw "Missing services file: $servicesFile"
 }
 
-podman machine start 2>$null
+$previousErrorActionPreference = $ErrorActionPreference
+try {
+    $ErrorActionPreference = "Continue"
+    $machineStartOutput = @(& podman machine start 2>&1)
+    $machineStartExitCode = $LASTEXITCODE
+}
+finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+}
+if ($machineStartExitCode -ne 0 -and (($machineStartOutput -join " ") -notmatch "already running")) {
+    throw "Could not start Podman machine. Output: $($machineStartOutput -join ' ')"
+}
 
 podman load --input $archivePath
 

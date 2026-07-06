@@ -110,6 +110,210 @@ Ha a hiba Maven dependency letoltes kozben jon, akkor a `mavenTlsVerify: false`
 kapcsolo adja hozza a Maven TLS workaround parametereket. Ha nincs Maven cert
 hiba, ezt is hagyd `true` erteken.
 
+## Teljes ujraepites es inditas sorban
+
+Ezt hasznald akkor, ha a `develop` branch megvan a gepen, van internet vagy
+beallitott proxy, es mindent nullarol ujra akarsz epiteni, majd azonnal
+elinditani Podman alatt.
+
+### 1. Projekt mappa es PowerShell unblock
+
+```powershell
+cd "<ahova-klonoztad-vagy-kicsomagoltad>\ALKALMASSAGI"
+
+Get-ChildItem -Recurse -File | Unblock-File
+```
+
+### 2. Podman machine ellenorzes
+
+```powershell
+podman machine list
+podman machine start
+podman info
+```
+
+Ha a `podman machine start` azt irja, hogy a machine mar fut, az nem gond.
+Ha azt irja, hogy nincs machine, akkor egyszer kell inicializalni:
+
+```powershell
+podman machine init
+podman machine start
+podman info
+```
+
+### 3. Infrastrukturapodok inditasa
+
+Ez inditja vagy ujrainditja az MSSQL, Kafka, Kafka UI, DbGate, Dozzle es NiFi
+podokat. A hasznalt portok alapbol 40000-tol indulnak.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-infra-pods.ps1 `
+  -SqlPassword "Alkalmassagi_2026!" `
+  -ExternalHostName localhost
+```
+
+### 4. Java appok forditasa host Java/Maven nelkul
+
+Ez Podman kontenerben futtatja a Mavent, ezert a Windows host gepre nem kell
+Java es nem kell Maven.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-apps-with-podman.ps1 `
+  -SkipTests
+```
+
+### 5. App image-ek epitese es app podok inditasa
+
+Ez ujraepiti a `local/app1:dev` - `local/app6:dev` image-eket, majd elinditja
+az app podokat.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-springboot-pods.ps1 `
+  -ServicesFile .\services.json
+```
+
+Ha a JAR-ok mar frissek, es csak ujra akarod inditani az app podokat:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-springboot-pods.ps1 `
+  -ServicesFile .\services.json `
+  -SkipBuild
+```
+
+### 6. Ellenorzes
+
+```powershell
+podman pod ps
+podman ps --pod
+
+Invoke-WebRequest http://localhost:40002 -UseBasicParsing
+Invoke-WebRequest http://localhost:40003 -UseBasicParsing
+Invoke-WebRequest http://localhost:40004 -UseBasicParsing
+Invoke-WebRequest http://localhost:40011/nifi/ -UseBasicParsing
+
+1..6 | ForEach-Object {
+  $port = 40004 + $_
+  Invoke-RestMethod "http://localhost:$port/actuator/health"
+}
+```
+
+Kafka pipeline teszt:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\send-test-message.ps1
+```
+
+Ezutan nezd meg:
+
+```text
+Kafka UI -> app7.final topic
+DB admin UI -> app1_audit ... app6_audit -> audit_events tabla
+Dozzle -> app1 ... app6, kafka, mssql, nifi logok
+```
+
+### 7. Offline bundle ujrageneralasa
+
+Ha azt akarod, hogy a mostani allapot masik gepre is atviheto legyen internet
+nelkul, generald ujra az offline bundle-t:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\export-offline-bundle.ps1 `
+  -ServicesFile .\services.json `
+  -SkipTests
+```
+
+Ez a vegeredmeny:
+
+```text
+.\offline-bundle\images\podman-images.tar
+```
+
+Ha a JAR-ok es a `local/appN:dev` image-ek mar frissen megvannak, es csak a tar
+bundle-t akarod ujracsomagolni:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\export-offline-bundle.ps1 `
+  -ServicesFile .\services.json `
+  -SkipJavaBuild
+```
+
+## Mikor melyik parancs kell?
+
+Teljes forrasbol ujraepites es inditas:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-infra-pods.ps1 -SqlPassword "Alkalmassagi_2026!" -ExternalHostName localhost
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-apps-with-podman.ps1 -SkipTests
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-springboot-pods.ps1 -ServicesFile .\services.json
+```
+
+Csak app forraskod valtozott:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-apps-with-podman.ps1 -SkipTests
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-springboot-pods.ps1 -ServicesFile .\services.json
+```
+
+Csak app YAML/JKS vagy `services.json` valtozott:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-springboot-pods.ps1 -ServicesFile .\services.json
+```
+
+Csak infra/NiFi/port/proxy konfiguracio valtozott:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-infra-pods.ps1 -SqlPassword "Alkalmassagi_2026!" -ExternalHostName localhost
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-springboot-pods.ps1 -ServicesFile .\services.json -SkipBuild
+```
+
+Masik gepen, offline bundle-bol inditas:
+
+```powershell
+cd "<ahova-masoltad>\offline-bundle"
+Get-ChildItem -Recurse -File | Unblock-File
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-offline.ps1 `
+  -SqlPassword "Alkalmassagi_2026!" `
+  -ExternalHostName localhost
+```
+
+## Mit csinalnak a fo scriptek?
+
+`scripts\deploy-infra-pods.ps1`:
+
+- letrehozza a `devnet` Podman networkot, ha hianyzik;
+- elinditja az MSSQL, Kafka, Kafka UI, DbGate, Dozzle es NiFi podokat;
+- beallitja a DbGate kapcsolatokat az app adatbazisokhoz;
+- letrehozza vagy frissiti a NiFi fajlbol Kafka-ba kuldo flow konfiguraciot;
+- nem fordit Java kodot.
+
+`scripts\build-apps-with-podman.ps1`:
+
+- elinditja a `java-build-pod` build podot;
+- Maven/JDK kontenerrel forditja az `app1` - `app6` modulokat;
+- a Maven cache-t a projekt alatt tartja: `data\maven-repo`;
+- nem inditja el az app podokat.
+
+`scripts\deploy-springboot-pods.ps1`:
+
+- a kesz JAR-okbol Podman image-et epit: `local/app1:dev` - `local/app6:dev`;
+- elinditja az app podokat;
+- a `services.json` alapjan oszt portot, app nevet es kornyezeti beallitast.
+
+`scripts\export-offline-bundle.ps1`:
+
+- letolti vagy ellenorzi a szukseges infra image-eket;
+- buildeli a Java appokat es app image-eket;
+- elmenti az osszes image-et az `offline-bundle\images\podman-images.tar` fajlba;
+- bemasolja az inditashoz szukseges scripteket, configokat es dokumentaciot.
+
+`offline-bundle\scripts\run-offline.ps1`:
+
+- betolti az image-eket a `podman-images.tar` fajlbol;
+- elinditja az infrat;
+- elinditja az app podokat;
+- internetet, Java-t es Maven-t nem igenyel a host gepen.
+
 ## Mit kell atmasolni?
 
 A teljes projektmappat masold at, vagy legalabb az `offline-bundle` mappat.
@@ -129,6 +333,7 @@ Az `.\offline-bundle\images\podman-images.tar` jelenleg ezeket tartalmazza:
 ```text
 mcr.microsoft.com/mssql/server:2022-latest
 apache/kafka-native:3.9.0
+apache/kafka:3.9.0
 ghcr.io/kafbat/kafka-ui:latest
 dbgate/dbgate:latest
 amir20/dozzle:latest
@@ -223,6 +428,31 @@ netstat -ano | findstr ":40000 :40001 :40002 :40003 :40004 :40005 :40006 :40007 
 ```
 
 Ha valamelyik port foglalt, akkor az adott szolgaltatas nem fog elindulni, vagy mas portot kell beallitani.
+
+Windowsos SQL kliensbol az alap MSSQL cim:
+
+```text
+localhost,40000
+```
+
+SSMS / Azure Data Studio alap beallitas:
+
+```text
+Server name: localhost,40000
+Authentication: SQL Login
+Login: sa
+Password: Alkalmassagi_2026!
+Trust server certificate: checked
+Encrypt: optional / false
+```
+
+Kontenerekbol nem ezt kell hasznalni, hanem:
+
+```text
+mssql:1433
+```
+
+Reszletes MSSQL csatlakozasi leiras: `SQL-SERVER-CONNECTION.md`.
 
 ## Masolasi javaslat
 
@@ -418,6 +648,18 @@ app6_audit
 
 Az app adatbazisokban az `audit_events` tabla mutatja, hogy az adott app milyen uzenetet vett at es mit kuldott tovabb.
 
+A DbGate a kontenerhalozaton beluli `mssql:1433` cimen kapcsolodik az SQL
+szerverhez. Ha kulon Windowsos SQL kliensbol akarsz csatlakozni, akkor ezt
+hasznald:
+
+```text
+localhost,40000
+sa / Alkalmassagi_2026!
+Trust server certificate: yes
+```
+
+Reszletek: `SQL-SERVER-CONNECTION.md`.
+
 ## Kafka UI
 
 Nyisd meg:
@@ -466,7 +708,7 @@ cd "<projekt-mappa>"
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\send-test-message.ps1
 ```
 
-Ha csak az `offline-bundle` mappa van atmasolva, akkor Kafka UI-bol is tudsz teszt uzenetet kuldeni az `app1.source` topicra.
+Ha csak az `offline-bundle` mappa van atmasolva, akkor ugyanez a script az offline bundle alol is hasznalhato, mert az export a Kafka CLI helper image-et is tartalmazza.
 
 Utana nezd meg:
 

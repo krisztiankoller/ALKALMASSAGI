@@ -319,6 +319,15 @@ app7_audit
 
 A kapcsolat az SQL Server `app7_audit` adatbazisara mutat.
 
+Emlkezteto SQL cimekhez:
+
+```text
+Az app podbol: mssql:1433
+Windows hostrol / SSMS / Azure Data Studio: localhost,40000
+```
+
+Reszletes SQL kapcsolodasi leiras: `SQL-SERVER-CONNECTION.md`.
+
 ## 9. Build
 
 Host Java/Maven nelkul:

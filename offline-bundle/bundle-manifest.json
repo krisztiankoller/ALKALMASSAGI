@@ -1,8 +1,9 @@
 ﻿{
-    "createdAt":  "2026-07-05T15:04:58",
+    "createdAt":  "2026-07-06T12:53:29",
     "networkName":  "devnet",
     "sqlImage":  "mcr.microsoft.com/mssql/server:2022-latest",
     "kafkaImage":  "apache/kafka-native:3.9.0",
+    "kafkaCliImage":  "apache/kafka:3.9.0",
     "kafkaUiImage":  "ghcr.io/kafbat/kafka-ui:latest",
     "sqlAdminImage":  "dbgate/dbgate:latest",
     "logViewerImage":  "amir20/dozzle:latest",
@@ -13,6 +14,7 @@
     "images":  [
                    "mcr.microsoft.com/mssql/server:2022-latest",
                    "apache/kafka-native:3.9.0",
+                   "apache/kafka:3.9.0",
                    "ghcr.io/kafbat/kafka-ui:latest",
                    "dbgate/dbgate:latest",
                    "amir20/dozzle:latest",

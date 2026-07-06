@@ -209,6 +209,28 @@ Windows hostrol DB klienssel:
 localhost,41000
 ```
 
+Alap porttal ugyanez:
+
+```text
+localhost,40000
+```
+
+SSMS / Azure Data Studio alap beallitas:
+
+```text
+Server name: localhost,40000
+Authentication: SQL Login
+Login: sa
+Password: Alkalmassagi_2026!
+Trust server certificate: checked
+Encrypt: optional / false
+```
+
+Ha atallitod az MSSQL host portot, csak a Windows hostrol hasznalt port valtozik.
+A konteneres JDBC URL marad `jdbc:sqlserver://mssql:1433`.
+
+Reszletes MSSQL csatlakozasi leiras: `SQL-SERVER-CONNECTION.md`.
+
 ## DB admin es Kafka UI URL-ek portvaltas utan
 
 Ha ezeket adtad meg:
