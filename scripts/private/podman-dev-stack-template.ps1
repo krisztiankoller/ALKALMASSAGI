@@ -2,7 +2,7 @@ param(
     [string]$SqlPassword,
 
     [string]$NetworkName = "devnet",
-    [string]$KafkaImage = "apache/kafka:3.9.0",
+    [string]$KafkaImage = "apache/kafka-native:3.9.0",
     [string]$SqlImage = "mcr.microsoft.com/mssql/server:2022-latest",
     [Alias("h", "?")]
     [switch]$Help
@@ -44,7 +44,7 @@ Parameterek:
       Podman network neve. Alapertelmezett: devnet
 
   -KafkaImage
-      Kafka image. Alapertelmezett: apache/kafka:3.9.0
+      Kafka image. Alapertelmezett: apache/kafka-native:3.9.0
 
   -SqlImage
       SQL Server image. Alapertelmezett: mcr.microsoft.com/mssql/server:2022-latest

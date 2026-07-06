@@ -78,6 +78,14 @@ Ez a scriptekben a Podman `pull` es `build` parancsokhoz ezt adja hozza:
 --tls-verify=false
 ```
 
+Spring Boot app image buildnel ezen felul a Containerfile ezt a build argot kapja:
+
+```text
+APK_INSECURE_TLS=true
+```
+
+Ilyenkor az Alpine `apk add curl` lepes `--no-check-certificate` kapcsoloval fut, ami ceges TLS inspection mogott segithet az app image build kozbeni csomagletoltesnel.
+
 Maven dependency letoltesnel pedig ezekkel futtatja a Maven buildet:
 
 ```text

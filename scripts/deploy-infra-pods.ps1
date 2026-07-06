@@ -2,7 +2,7 @@ param(
     [string]$SqlPassword,
 
     [string]$NetworkName = "devnet",
-    [string]$KafkaImage = "apache/kafka:3.9.0",
+    [string]$KafkaImage = "apache/kafka-native:3.9.0",
     [string]$KafkaUiImage = "ghcr.io/kafbat/kafka-ui:latest",
     [string]$SqlImage = "mcr.microsoft.com/mssql/server:2022-latest",
     [string]$SqlAdminImage = "dbgate/dbgate:latest",

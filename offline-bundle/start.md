@@ -128,7 +128,7 @@ Az `.\offline-bundle\images\podman-images.tar` jelenleg ezeket tartalmazza:
 
 ```text
 mcr.microsoft.com/mssql/server:2022-latest
-apache/kafka:3.9.0
+apache/kafka-native:3.9.0
 ghcr.io/kafbat/kafka-ui:latest
 dbgate/dbgate:latest
 amir20/dozzle:latest

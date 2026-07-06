@@ -2,7 +2,7 @@ param(
     [string]$SqlPassword,
 
     [string]$NetworkName = "devnet",
-    [string]$KafkaImage = "apache/kafka:3.9.0",
+    [string]$KafkaImage = "apache/kafka-native:3.9.0",
     [string]$KafkaUiImage = "ghcr.io/kafbat/kafka-ui:latest",
     [string]$SqlImage = "mcr.microsoft.com/mssql/server:2022-latest",
     [string]$SqlAdminImage = "dbgate/dbgate:latest",
@@ -180,12 +180,40 @@ function Get-PrimaryIPv4Address {
     return $env:COMPUTERNAME
 }
 
+function Get-PodmanWslDistro {
+    if ($script:PodmanWslDistro) {
+        return $script:PodmanWslDistro
+    }
+
+    $distros = @(wsl.exe -l -q 2>$null |
+        ForEach-Object { ($_ -replace "`0", "").Trim() } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+
+    $distro = $distros | Where-Object { $_ -eq "podman-machine-default" } | Select-Object -First 1
+    if (-not $distro) {
+        $distro = $distros | Where-Object { $_ -like "podman-machine-*" } | Select-Object -First 1
+    }
+
+    if (-not $distro) {
+        throw "No Podman WSL distro was found. Run these first: podman machine init; podman machine start. Then check: podman machine list; wsl -l -v"
+    }
+
+    $script:PodmanWslDistro = $distro
+    return $script:PodmanWslDistro
+}
+
 function ConvertTo-WslPath {
     param([string]$Path)
 
-    $resolvedPath = (Resolve-Path -Path $Path).Path
-    $wslPath = wsl -d podman-machine-default -- wslpath -a $resolvedPath
-    return ($wslPath | Select-Object -First 1).Trim()
+    $resolvedPath = (Resolve-Path -LiteralPath $Path).Path
+    $root = [System.IO.Path]::GetPathRoot($resolvedPath)
+    if ([string]::IsNullOrWhiteSpace($root) -or $root.Length -lt 2 -or $root[1] -ne ":") {
+        throw "Only local drive paths can be mounted into the Podman WSL machine. Path: $resolvedPath"
+    }
+
+    $drive = ([string]$root[0]).ToLowerInvariant()
+    $relativePath = $resolvedPath.Substring($root.Length).Replace("\", "/")
+    return "/mnt/$drive/$relativePath"
 }
 
 function Write-Utf8File {
@@ -471,7 +499,11 @@ $NifiFlowFileRepositoryWsl = ConvertTo-WslPath $NifiFlowFileRepository
 $NifiContentRepositoryWsl = ConvertTo-WslPath $NifiContentRepository
 $NifiProvenanceRepositoryWsl = ConvertTo-WslPath $NifiProvenanceRepository
 $NifiStateWsl = ConvertTo-WslPath $NifiState
-wsl -d podman-machine-default -- mkdir -p $MssqlBackupDataWsl $KafkaDataWsl $CloudBeaverDataWsl $NifiConfWsl $NifiDropDataWsl $NifiLogsWsl $NifiDatabaseRepositoryWsl $NifiFlowFileRepositoryWsl $NifiContentRepositoryWsl $NifiProvenanceRepositoryWsl $NifiStateWsl
+$podmanWslDistro = Get-PodmanWslDistro
+$mkdirOutput = @(wsl.exe -d $podmanWslDistro -- mkdir -p $MssqlBackupDataWsl $KafkaDataWsl $CloudBeaverDataWsl $NifiConfWsl $NifiDropDataWsl $NifiLogsWsl $NifiDatabaseRepositoryWsl $NifiFlowFileRepositoryWsl $NifiContentRepositoryWsl $NifiProvenanceRepositoryWsl $NifiStateWsl 2>&1)
+if ($LASTEXITCODE -ne 0) {
+    throw "Could not create data directories inside Podman WSL distro '$podmanWslDistro'. Output: $($mkdirOutput -join ' ')"
+}
 
 Recreate-Pod "mssql-pod" @(
     "--network", $NetworkName,

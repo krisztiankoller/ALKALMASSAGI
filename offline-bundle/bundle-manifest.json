@@ -2,7 +2,7 @@
     "createdAt":  "2026-07-05T15:04:58",
     "networkName":  "devnet",
     "sqlImage":  "mcr.microsoft.com/mssql/server:2022-latest",
-    "kafkaImage":  "apache/kafka:3.9.0",
+    "kafkaImage":  "apache/kafka-native:3.9.0",
     "kafkaUiImage":  "ghcr.io/kafbat/kafka-ui:latest",
     "sqlAdminImage":  "dbgate/dbgate:latest",
     "logViewerImage":  "amir20/dozzle:latest",
@@ -12,7 +12,7 @@
     "buildPodName":  "java-build-pod",
     "images":  [
                    "mcr.microsoft.com/mssql/server:2022-latest",
-                   "apache/kafka:3.9.0",
+                   "apache/kafka-native:3.9.0",
                    "ghcr.io/kafbat/kafka-ui:latest",
                    "dbgate/dbgate:latest",
                    "amir20/dozzle:latest",

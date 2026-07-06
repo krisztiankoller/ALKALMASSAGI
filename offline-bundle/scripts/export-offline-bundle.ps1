@@ -3,7 +3,7 @@ param(
 
     [string]$BundleDir = "",
     [string]$NetworkName = "devnet",
-    [string]$KafkaImage = "apache/kafka:3.9.0",
+    [string]$KafkaImage = "apache/kafka-native:3.9.0",
     [string]$KafkaUiImage = "ghcr.io/kafbat/kafka-ui:latest",
     [string]$SqlImage = "mcr.microsoft.com/mssql/server:2022-latest",
     [string]$SqlAdminImage = "dbgate/dbgate:latest",
@@ -344,7 +344,7 @@ function Set-ProxyEnvironment {
 
 function Add-ProxyBuildArgs {
     param(
-        [System.Collections.Generic.List[string]]$Args,
+        [System.Collections.Generic.List[string]]$ArgumentList,
         [string]$HttpProxy,
         [string]$HttpsProxy,
         [string]$NoProxy
@@ -359,9 +359,18 @@ function Add-ProxyBuildArgs {
         @("no_proxy", $NoProxy)
     )) {
         if (-not [string]::IsNullOrWhiteSpace($item[1])) {
-            $Args.Add("--build-arg")
-            $Args.Add("$($item[0])=$($item[1])")
+            $ArgumentList.Add("--build-arg")
+            $ArgumentList.Add("$($item[0])=$($item[1])")
         }
+    }
+}
+
+function Add-ApkTlsBuildArg {
+    param([System.Collections.Generic.List[string]]$ArgumentList)
+
+    if ($script:PodmanTlsVerify -eq $false) {
+        $ArgumentList.Add("--build-arg")
+        $ArgumentList.Add("APK_INSECURE_TLS=true")
     }
 }
 
@@ -422,7 +431,8 @@ function Build-ServiceImage {
         $buildArgs.Add($arg)
     }
     Add-PodmanTlsVerifyArg -Args $buildArgs
-    Add-ProxyBuildArgs -Args $buildArgs -HttpProxy $script:EffectiveHttpProxy -HttpsProxy $script:EffectiveHttpsProxy -NoProxy $script:EffectiveNoProxy
+    Add-ApkTlsBuildArg -ArgumentList $buildArgs
+    Add-ProxyBuildArgs -ArgumentList $buildArgs -HttpProxy $script:EffectiveHttpProxy -HttpsProxy $script:EffectiveHttpsProxy -NoProxy $script:EffectiveNoProxy
     $buildArgs.Add($buildDir)
 
     Invoke-Podman -Arguments $buildArgs.ToArray()

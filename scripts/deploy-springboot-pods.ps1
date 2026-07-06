@@ -284,6 +284,15 @@ function Add-ProxyBuildArgs {
     }
 }
 
+function Add-ApkTlsBuildArg {
+    param([System.Collections.Generic.List[string]]$ArgumentList)
+
+    if ($script:PodmanTlsVerify -eq $false) {
+        $ArgumentList.Add("--build-arg")
+        $ArgumentList.Add("APK_INSECURE_TLS=true")
+    }
+}
+
 function Find-ServiceJar {
     param([string]$ProjectDir)
 
@@ -494,6 +503,7 @@ foreach ($service in $services) {
             $buildArgs.Add($arg)
         }
         Add-PodmanTlsVerifyArg -Args $buildArgs
+        Add-ApkTlsBuildArg -ArgumentList $buildArgs
         Add-ProxyBuildArgs -Args $buildArgs -HttpProxy $effectiveHttpProxy -HttpsProxy $effectiveHttpsProxy -NoProxy $NoProxy
         $buildArgs.Add($buildDir)
         & podman @($buildArgs.ToArray())
