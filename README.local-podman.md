@@ -53,7 +53,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\offline-bundle\scripts\run
 
 If the machine is behind an authenticated proxy, fill `proxy.config.json` first.
 If Podman image pulls fail with `tls: failed to verify certificate: x509`, set
-`"podmanTlsVerify": false` in `proxy.config.json`. Details: `PROXY-CONFIG.md`.
+`"podmanTlsVerify": false` in `proxy.config.json`. If Maven dependency downloads
+fail with `certificate signed by unknown authority` or `PKIX path building failed`,
+set `"mavenTlsVerify": false` too. Details: `PROXY-CONFIG.md`.
 
 ## SQL Server connection
 

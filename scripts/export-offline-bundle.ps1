@@ -21,6 +21,7 @@ param(
     [string]$ProxyUsername = "",
     [string]$ProxyPassword = "",
     [bool]$PodmanTlsVerify = $true,
+    [bool]$MavenTlsVerify = $true,
     [switch]$SkipJavaBuild,
     [switch]$SkipTests,
     [switch]$OfflineJavaBuild,
@@ -31,6 +32,7 @@ param(
 $ErrorActionPreference = "Stop"
 $script:InvocationBoundParameters = $PSBoundParameters
 $script:PodmanTlsVerify = $PodmanTlsVerify
+$script:MavenTlsVerify = $MavenTlsVerify
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 
 function Show-Help {
@@ -116,6 +118,11 @@ Parameterek:
       Podman registry TLS certificate ellenorzes pull/build kozben. Alapertelmezett: true.
       Ceges TLS inspection/x509 hiba eseten inkabb a proxy.config.json fajlban allitsd:
       "podmanTlsVerify": false
+
+  -MavenTlsVerify
+      Maven/Java HTTPS certificate ellenorzes dependency letoltes kozben. Alapertelmezett: true.
+      Ceges TLS inspection vagy ismeretlen CA hiba eseten inkabb a proxy.config.json fajlban allitsd:
+      "mavenTlsVerify": false
 
   -SkipJavaBuild
       Nem futtat Maven buildet. Akkor hasznald, ha a JAR-ok mar keszek.
@@ -223,6 +230,10 @@ function Apply-ProxyConfigFile {
     if (-not $script:InvocationBoundParameters.ContainsKey("PodmanTlsVerify") -and
         $config.PSObject.Properties.Name -contains "podmanTlsVerify") {
         $script:PodmanTlsVerify = [System.Convert]::ToBoolean($config.podmanTlsVerify)
+    }
+    if (-not $script:InvocationBoundParameters.ContainsKey("MavenTlsVerify") -and
+        $config.PSObject.Properties.Name -contains "mavenTlsVerify") {
+        $script:MavenTlsVerify = [System.Convert]::ToBoolean($config.mavenTlsVerify)
     }
     if ($null -eq $config -or $config.enabled -ne $true) {
         return
@@ -462,6 +473,9 @@ if (-not $SkipJavaBuild) {
     }
     if ($OfflineJavaBuild) {
         $javaBuildArgs += "-Offline"
+    }
+    if ($script:MavenTlsVerify -eq $false) {
+        $javaBuildArgs += "-MavenTlsVerify:`$false"
     }
 
     & powershell @javaBuildArgs

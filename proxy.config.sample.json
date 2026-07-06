@@ -5,6 +5,7 @@
   "username": "DOMAIN\\user",
   "password": "change-me",
   "podmanTlsVerify": true,
+  "mavenTlsVerify": true,
   "noProxy": [
     "localhost",
     "127.0.0.1",

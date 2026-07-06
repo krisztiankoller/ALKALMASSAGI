@@ -10,6 +10,7 @@ param(
     [string]$ProxyUsername = "",
     [string]$ProxyPassword = "",
     [bool]$PodmanTlsVerify = $true,
+    [bool]$MavenTlsVerify = $true,
     [switch]$SkipTests,
     [switch]$Offline,
     [switch]$KeepBuildContainer,
@@ -20,6 +21,7 @@ param(
 $ErrorActionPreference = "Stop"
 $script:InvocationBoundParameters = $PSBoundParameters
 $script:PodmanTlsVerify = $PodmanTlsVerify
+$script:MavenTlsVerify = $MavenTlsVerify
 
 function Show-Help {
     @'
@@ -71,6 +73,11 @@ Fontos parameterek:
       Podman registry TLS certificate ellenorzes. Alapertelmezett: true.
       Ceges TLS inspection/x509 hiba eseten inkabb a proxy.config.json fajlban allitsd:
       "podmanTlsVerify": false
+
+  -MavenTlsVerify
+      Maven/Java HTTPS certificate ellenorzes dependency letoltes kozben. Alapertelmezett: true.
+      Ceges TLS inspection vagy ismeretlen CA hiba eseten inkabb a proxy.config.json fajlban allitsd:
+      "mavenTlsVerify": false
 
   -SkipTests
       Maven tesztek kihagyasa: -DskipTests.
@@ -179,6 +186,10 @@ function Apply-ProxyConfigFile {
         $config.PSObject.Properties.Name -contains "podmanTlsVerify") {
         $script:PodmanTlsVerify = [System.Convert]::ToBoolean($config.podmanTlsVerify)
     }
+    if (-not $script:InvocationBoundParameters.ContainsKey("MavenTlsVerify") -and
+        $config.PSObject.Properties.Name -contains "mavenTlsVerify") {
+        $script:MavenTlsVerify = [System.Convert]::ToBoolean($config.mavenTlsVerify)
+    }
     if ($null -eq $config -or $config.enabled -ne $true) {
         return
     }
@@ -229,6 +240,17 @@ function Add-PodmanTlsVerifyArg {
 
     if ($script:PodmanTlsVerify -eq $false) {
         $Args.Add("--tls-verify=false")
+    }
+}
+
+function Add-MavenTlsVerifyArgs {
+    param([System.Collections.Generic.List[string]]$Args)
+
+    if ($script:MavenTlsVerify -eq $false) {
+        $Args.Add("-Dmaven.resolver.transport=wagon")
+        $Args.Add("-Dmaven.wagon.http.ssl.insecure=true")
+        $Args.Add("-Dmaven.wagon.http.ssl.allowall=true")
+        $Args.Add("-Dmaven.wagon.http.ssl.ignore.validity.dates=true")
     }
 }
 
@@ -414,13 +436,17 @@ if ($LASTEXITCODE -eq 0) {
     Invoke-Podman -Arguments @("rm", "-f", $BuildContainerName)
 }
 
-$mavenArgs = @("mvn", "clean", "package")
+$mavenArgs = [System.Collections.Generic.List[string]]::new()
+foreach ($arg in @("mvn", "clean", "package")) {
+    $mavenArgs.Add($arg)
+}
 if ($SkipTests) {
-    $mavenArgs += "-DskipTests"
+    $mavenArgs.Add("-DskipTests")
 }
 if ($Offline) {
-    $mavenArgs += "-o"
+    $mavenArgs.Add("-o")
 }
+Add-MavenTlsVerifyArgs -Args $mavenArgs
 
 $runArgs = [System.Collections.Generic.List[string]]::new()
 foreach ($arg in @(
@@ -435,7 +461,7 @@ foreach ($arg in @(
 }
 Add-ProxyEnvArgs -Args $runArgs -HttpProxy $effectiveHttpProxy -HttpsProxy $effectiveHttpsProxy -NoProxy $NoProxy
 $runArgs.Add($MavenImage)
-foreach ($arg in $mavenArgs) {
+foreach ($arg in $mavenArgs.ToArray()) {
     $runArgs.Add($arg)
 }
 

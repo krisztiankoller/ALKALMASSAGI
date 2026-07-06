@@ -70,6 +70,7 @@ Pelda:
   "username": "DOMAIN\\user",
   "password": "secret",
   "podmanTlsVerify": false,
+  "mavenTlsVerify": false,
   "noProxy": [
     "localhost",
     "127.0.0.1",
@@ -94,6 +95,7 @@ miatt ilyen Podman hibat kapsz:
 
 ```text
 tls: failed to verify certificate: x509
+certificate signed by unknown authority
 ```
 
 Ez a Podman `pull` es `build` parancsokhoz automatikusan hozzaadja:
@@ -103,6 +105,10 @@ Ez a Podman `pull` es `build` parancsokhoz automatikusan hozzaadja:
 ```
 
 Ha nincs ilyen cert hiba, hagyd `true` erteken.
+
+Ha a hiba Maven dependency letoltes kozben jon, akkor a `mavenTlsVerify: false`
+kapcsolo adja hozza a Maven TLS workaround parametereket. Ha nincs Maven cert
+hiba, ezt is hagyd `true` erteken.
 
 ## Mit kell atmasolni?
 
@@ -544,7 +550,8 @@ Gyors workaround ceges proxy/TLS inspection mogott: a projekt gyokerben a
 
 ```json
 {
-  "podmanTlsVerify": false
+  "podmanTlsVerify": false,
+  "mavenTlsVerify": false
 }
 ```
 

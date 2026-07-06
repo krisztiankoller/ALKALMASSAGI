@@ -9,6 +9,8 @@ param(
     [string]$NoProxy = "localhost,127.0.0.1,mssql,kafka,kafka-ui,sql-admin,app1,app2,app3,app4,app5,app6",
     [string]$ProxyUsername = "",
     [string]$ProxyPassword = "",
+    [bool]$PodmanTlsVerify = $true,
+    [bool]$MavenTlsVerify = $true,
     [switch]$SkipTests,
     [switch]$Offline,
     [switch]$KeepBuildContainer,
@@ -18,6 +20,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 $script:InvocationBoundParameters = $PSBoundParameters
+$script:PodmanTlsVerify = $PodmanTlsVerify
+$script:MavenTlsVerify = $MavenTlsVerify
 
 function Show-Help {
     @'
@@ -65,6 +69,16 @@ Fontos parameterek:
   -HttpProxy, -HttpsProxy, -NoProxy, -ProxyUsername, -ProxyPassword
       Ideiglenes parancssori proxy feluliras. Normal esetben a proxy.config.json hasznalando.
 
+  -PodmanTlsVerify
+      Podman registry TLS certificate ellenorzes. Alapertelmezett: true.
+      Ceges TLS inspection/x509 hiba eseten inkabb a proxy.config.json fajlban allitsd:
+      "podmanTlsVerify": false
+
+  -MavenTlsVerify
+      Maven/Java HTTPS certificate ellenorzes dependency letoltes kozben. Alapertelmezett: true.
+      Ceges TLS inspection vagy ismeretlen CA hiba eseten inkabb a proxy.config.json fajlban allitsd:
+      "mavenTlsVerify": false
+
   -SkipTests
       Maven tesztek kihagyasa: -DskipTests.
 
@@ -100,12 +114,40 @@ function Invoke-Podman {
     }
 }
 
+function Get-PodmanWslDistro {
+    if ($script:PodmanWslDistro) {
+        return $script:PodmanWslDistro
+    }
+
+    $distros = @(wsl.exe -l -q 2>$null |
+        ForEach-Object { ($_ -replace "`0", "").Trim() } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+
+    $distro = $distros | Where-Object { $_ -eq "podman-machine-default" } | Select-Object -First 1
+    if (-not $distro) {
+        $distro = $distros | Where-Object { $_ -like "podman-machine-*" } | Select-Object -First 1
+    }
+
+    if (-not $distro) {
+        throw "No Podman WSL distro was found. Run these first: podman machine init; podman machine start. Then check: podman machine list; wsl -l -v"
+    }
+
+    $script:PodmanWslDistro = $distro
+    return $script:PodmanWslDistro
+}
+
 function ConvertTo-WslPath {
     param([string]$Path)
 
-    $resolvedPath = (Resolve-Path -Path $Path).Path
-    $wslPath = wsl -d podman-machine-default -- wslpath -a $resolvedPath
-    return ($wslPath | Select-Object -First 1).Trim()
+    $resolvedPath = (Resolve-Path -LiteralPath $Path).Path
+    $root = [System.IO.Path]::GetPathRoot($resolvedPath)
+    if ([string]::IsNullOrWhiteSpace($root) -or $root.Length -lt 2 -or $root[1] -ne ":") {
+        throw "Only local drive paths can be mounted into the Podman WSL machine. Path: $resolvedPath"
+    }
+
+    $drive = ([string]$root[0]).ToLowerInvariant()
+    $relativePath = $resolvedPath.Substring($root.Length).Replace("\", "/")
+    return "/mnt/$drive/$relativePath"
 }
 
 function Format-ProjectRelativePath {
@@ -140,6 +182,14 @@ function Apply-ProxyConfigFile {
     }
 
     $config = Get-Content -LiteralPath $ConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    if (-not $script:InvocationBoundParameters.ContainsKey("PodmanTlsVerify") -and
+        $config.PSObject.Properties.Name -contains "podmanTlsVerify") {
+        $script:PodmanTlsVerify = [System.Convert]::ToBoolean($config.podmanTlsVerify)
+    }
+    if (-not $script:InvocationBoundParameters.ContainsKey("MavenTlsVerify") -and
+        $config.PSObject.Properties.Name -contains "mavenTlsVerify") {
+        $script:MavenTlsVerify = [System.Convert]::ToBoolean($config.mavenTlsVerify)
+    }
     if ($null -eq $config -or $config.enabled -ne $true) {
         return
     }
@@ -183,6 +233,25 @@ function Resolve-ProxyUrl {
     }
 
     return $builder.Uri.AbsoluteUri
+}
+
+function Add-PodmanTlsVerifyArg {
+    param([System.Collections.Generic.List[string]]$Args)
+
+    if ($script:PodmanTlsVerify -eq $false) {
+        $Args.Add("--tls-verify=false")
+    }
+}
+
+function Add-MavenTlsVerifyArgs {
+    param([System.Collections.Generic.List[string]]$Args)
+
+    if ($script:MavenTlsVerify -eq $false) {
+        $Args.Add("-Dmaven.resolver.transport=wagon")
+        $Args.Add("-Dmaven.wagon.http.ssl.insecure=true")
+        $Args.Add("-Dmaven.wagon.http.ssl.allowall=true")
+        $Args.Add("-Dmaven.wagon.http.ssl.ignore.validity.dates=true")
+    }
 }
 
 function Set-ProxyEnvironment {
@@ -348,7 +417,13 @@ $projectRootWsl = ConvertTo-WslPath $projectRoot
 $mavenRepoWsl = ConvertTo-WslPath $mavenRepo
 
 if (-not $Offline) {
-    Invoke-Podman -Arguments @("pull", "--platform", "linux/amd64", $MavenImage)
+    $pullArgs = [System.Collections.Generic.List[string]]::new()
+    foreach ($arg in @("pull", "--platform", "linux/amd64")) {
+        $pullArgs.Add($arg)
+    }
+    Add-PodmanTlsVerifyArg -Args $pullArgs
+    $pullArgs.Add($MavenImage)
+    Invoke-Podman -Arguments $pullArgs.ToArray()
 }
 
 & podman pod exists $BuildPodName *> $null
@@ -361,13 +436,17 @@ if ($LASTEXITCODE -eq 0) {
     Invoke-Podman -Arguments @("rm", "-f", $BuildContainerName)
 }
 
-$mavenArgs = @("mvn", "clean", "package")
+$mavenArgs = [System.Collections.Generic.List[string]]::new()
+foreach ($arg in @("mvn", "clean", "package")) {
+    $mavenArgs.Add($arg)
+}
 if ($SkipTests) {
-    $mavenArgs += "-DskipTests"
+    $mavenArgs.Add("-DskipTests")
 }
 if ($Offline) {
-    $mavenArgs += "-o"
+    $mavenArgs.Add("-o")
 }
+Add-MavenTlsVerifyArgs -Args $mavenArgs
 
 $runArgs = [System.Collections.Generic.List[string]]::new()
 foreach ($arg in @(
@@ -382,7 +461,7 @@ foreach ($arg in @(
 }
 Add-ProxyEnvArgs -Args $runArgs -HttpProxy $effectiveHttpProxy -HttpsProxy $effectiveHttpsProxy -NoProxy $NoProxy
 $runArgs.Add($MavenImage)
-foreach ($arg in $mavenArgs) {
+foreach ($arg in $mavenArgs.ToArray()) {
     $runArgs.Add($arg)
 }
 

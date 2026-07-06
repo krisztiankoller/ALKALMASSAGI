@@ -35,6 +35,7 @@ Ezt kell kitolteni. Pelda:
   "username": "DOMAIN\\user",
   "password": "secret",
   "podmanTlsVerify": true,
+  "mavenTlsVerify": true,
   "noProxy": [
     "localhost",
     "127.0.0.1",
@@ -59,13 +60,15 @@ Ha a ceges proxy/TLS inspection miatt a Podman image letoltes ilyen hibaval all 
 
 ```text
 tls: failed to verify certificate: x509
+certificate signed by unknown authority
 ```
 
 akkor ideiglenesen allithato:
 
 ```json
 {
-  "podmanTlsVerify": false
+  "podmanTlsVerify": false,
+  "mavenTlsVerify": false
 }
 ```
 
@@ -73,6 +76,15 @@ Ez a scriptekben a Podman `pull` es `build` parancsokhoz ezt adja hozza:
 
 ```text
 --tls-verify=false
+```
+
+Maven dependency letoltesnel pedig ezekkel futtatja a Maven buildet:
+
+```text
+-Dmaven.resolver.transport=wagon
+-Dmaven.wagon.http.ssl.insecure=true
+-Dmaven.wagon.http.ssl.allowall=true
+-Dmaven.wagon.http.ssl.ignore.validity.dates=true
 ```
 
 Biztonsagosabb hosszu tavu megoldas a ceges CA importalasa a Podman machine-be, de zart ceges proxy mogott a fenti kapcsolo gyors workaround lehet.
@@ -246,6 +258,22 @@ podman machine start
 Ez a host trusted CA-kat importalja a Podman machine-be, ha a Podman verzio tamogatja.
 
 Fontos: a Maven kontener sajat Java truststore-t hasznalhat. Ha Maven certificate hibaval all meg, akkor a ceges CA-t vagy Maven/Java truststore-ba kell tenni, vagy olyan Maven repository/proxy megoldast kell hasznalni, amit a kontener Java runtime-ja is megbizhatonak lat.
+
+Gyors Maven workaround, ha csak fejlesztoi/proxy mogotti build kell:
+
+```json
+{
+  "mavenTlsVerify": false
+}
+```
+
+Ez nem ajanlott vegleges biztonsagi megoldasnak, de segithet ceges TLS inspection mogott, amikor a Maven ilyen jellegu hibaval all meg:
+
+```text
+certificate signed by unknown authority
+PKIX path building failed
+unable to find valid certification path
+```
 
 ## Offline target gep proxy mogott
 
