@@ -497,6 +497,10 @@ if (-not $SkipJavaBuild) {
     if ($OfflineJavaBuild) {
         $javaBuildArgs += "-Offline"
     }
+    if ($script:PodmanTlsVerify -eq $false) {
+        $javaBuildArgs += "-PodmanTlsVerify"
+        $javaBuildArgs += "false"
+    }
     if ($script:MavenTlsVerify -eq $false) {
         $javaBuildArgs += "-MavenTlsVerify"
         $javaBuildArgs += "false"
