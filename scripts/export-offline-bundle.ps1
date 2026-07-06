@@ -22,6 +22,8 @@ param(
     [string]$ProxyPassword = "",
     [string]$PodmanTlsVerify = "true",
     [string]$MavenTlsVerify = "true",
+    [int]$PodmanPullRetries = 5,
+    [int]$PodmanPullRetryDelaySeconds = 10,
     [switch]$SkipJavaBuild,
     [switch]$SkipTests,
     [switch]$OfflineJavaBuild,
@@ -105,6 +107,11 @@ Parameterek:
       Podman registry TLS certificate ellenorzes pull/build kozben. Alapertelmezett: true.
       Ceges TLS inspection/x509 hiba eseten inkabb a proxy.config.json fajlban allitsd:
       "podmanTlsVerify": false
+  -PodmanPullRetries
+      Podman pull probalkozasok szama image-enkent. Alapertelmezett es minimum: 5
+  -PodmanPullRetryDelaySeconds
+      Varakozas ket sikertelen podman pull probalkozas kozott masodpercben.
+      Alapertelmezett: 10
   -MavenTlsVerify
       Maven/Java HTTPS certificate ellenorzes dependency letoltes kozben. Alapertelmezett: true.
       Ceges TLS inspection vagy ismeretlen CA hiba eseten inkabb a proxy.config.json fajlban allitsd:
@@ -278,7 +285,26 @@ function Invoke-PodmanPull {
     }
     Add-PodmanTlsVerifyArg -ArgumentList $pullArgs
     $pullArgs.Add($Image)
-    Invoke-Podman -Arguments $pullArgs.ToArray()
+
+    $attempts = [Math]::Max(5, $PodmanPullRetries)
+    $delaySeconds = [Math]::Max(0, $PodmanPullRetryDelaySeconds)
+    for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+        try {
+            Write-Host "Pulling image '$Image' (attempt $attempt/$attempts)..."
+            Invoke-Podman -Arguments $pullArgs.ToArray()
+            return
+        }
+        catch {
+            if ($attempt -ge $attempts) {
+                throw "Could not pull image '$Image' after $attempts attempt(s). Last error: $($_.Exception.Message)"
+            }
+
+            Write-Warning "Pull image '$Image' failed on attempt $attempt/$attempts. Retrying in $delaySeconds seconds. Error: $($_.Exception.Message)"
+            if ($delaySeconds -gt 0) {
+                Start-Sleep -Seconds $delaySeconds
+            }
+        }
+    }
 }
 function Set-ProxyEnvironment {
     param(
@@ -472,7 +498,9 @@ if (-not $SkipJavaBuild) {
         "-File", $javaBuildScript,
         "-MavenImage", $MavenImage,
         "-BuildPodName", $BuildPodName,
-        "-ProxyConfigFile", $ProxyConfigFile
+        "-ProxyConfigFile", $ProxyConfigFile,
+        "-PodmanPullRetries", $PodmanPullRetries,
+        "-PodmanPullRetryDelaySeconds", $PodmanPullRetryDelaySeconds
     )
     if ($SkipTests) {
         $javaBuildArgs += "-SkipTests"

@@ -295,6 +295,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-offline.ps1 `
 `scripts\build-apps-with-podman.ps1`:
 
 - elinditja a `java-build-pod` build podot;
+- a Maven builder image explicit `podman pull` muveletet alapbol 5-szor probalja;
 - Maven/JDK kontenerrel forditja az `app1` - `app6` modulokat;
 - a Maven cache-t a projekt alatt tartja: `data\maven-repo`;
 - a build logot a projekt alatt tartja: `data\build-logs\current.log`;
@@ -312,6 +313,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-offline.ps1 `
 `scripts\export-offline-bundle.ps1`:
 
 - letolti vagy ellenorzi a szukseges infra image-eket;
+- minden explicit `podman pull` muveletet alapbol 5-szor probal, mielott
+  hibaval megall;
 - buildeli a Java appokat es app image-eket;
 - elmenti az osszes image-et az `offline-bundle\images\podman-images.tar` fajlba;
 - bemasolja az inditashoz szukseges scripteket, configokat es dokumentaciot.

@@ -13,6 +13,8 @@ param(
     [string]$ProxyPassword = "",
     [string]$PodmanTlsVerify = "true",
     [string]$MavenTlsVerify = "true",
+    [int]$PodmanPullRetries = 5,
+    [int]$PodmanPullRetryDelaySeconds = 10,
     [switch]$SkipTests,
     [switch]$Offline,
     [switch]$KeepBuildContainer,
@@ -74,6 +76,11 @@ Fontos parameterek:
       Podman registry TLS certificate ellenorzes. Alapertelmezett: true.
       Ceges TLS inspection/x509 hiba eseten inkabb a proxy.config.json fajlban allitsd:
       "podmanTlsVerify": false
+  -PodmanPullRetries
+      Podman pull probalkozasok szama a Maven builder image-re. Alapertelmezett es minimum: 5
+  -PodmanPullRetryDelaySeconds
+      Varakozas ket sikertelen podman pull probalkozas kozott masodpercben.
+      Alapertelmezett: 10
   -MavenTlsVerify
       Maven/Java HTTPS certificate ellenorzes dependency letoltes kozben. Alapertelmezett: true.
       Ceges TLS inspection vagy ismeretlen CA hiba eseten inkabb a proxy.config.json fajlban allitsd:
@@ -292,6 +299,36 @@ function Add-PodmanTlsVerifyArg {
         $ArgumentList.Add("--tls-verify=false")
     }
 }
+function Invoke-PodmanPull {
+    param([string]$Image)
+
+    $pullArgs = [System.Collections.Generic.List[string]]::new()
+    foreach ($arg in @("pull", "--platform", "linux/amd64")) {
+        $pullArgs.Add($arg)
+    }
+    Add-PodmanTlsVerifyArg -ArgumentList $pullArgs
+    $pullArgs.Add($Image)
+
+    $attempts = [Math]::Max(5, $PodmanPullRetries)
+    $delaySeconds = [Math]::Max(0, $PodmanPullRetryDelaySeconds)
+    for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+        try {
+            Write-Host "Pulling image '$Image' (attempt $attempt/$attempts)..."
+            Invoke-Podman -Arguments $pullArgs.ToArray()
+            return
+        }
+        catch {
+            if ($attempt -ge $attempts) {
+                throw "Could not pull image '$Image' after $attempts attempt(s). Last error: $($_.Exception.Message)"
+            }
+
+            Write-Warning "Pull image '$Image' failed on attempt $attempt/$attempts. Retrying in $delaySeconds seconds. Error: $($_.Exception.Message)"
+            if ($delaySeconds -gt 0) {
+                Start-Sleep -Seconds $delaySeconds
+            }
+        }
+    }
+}
 function Add-MavenTlsVerifyArgs {
     param([System.Collections.Generic.List[string]]$ArgumentList)
     if ($script:ResolvedMavenTlsVerify -eq $false) {
@@ -468,13 +505,7 @@ $projectRootWsl = ConvertTo-WslPath $projectRoot
 $mavenRepoWsl = ConvertTo-WslPath $mavenRepo
 $buildLogDirWsl = ConvertTo-WslPath $buildLogDirResolved
 if (-not $Offline) {
-    $pullArgs = [System.Collections.Generic.List[string]]::new()
-    foreach ($arg in @("pull", "--platform", "linux/amd64")) {
-        $pullArgs.Add($arg)
-    }
-    Add-PodmanTlsVerifyArg -ArgumentList $pullArgs
-    $pullArgs.Add($MavenImage)
-    Invoke-Podman -Arguments $pullArgs.ToArray()
+    Invoke-PodmanPull -Image $MavenImage
 }
 & podman pod exists $BuildPodName *> $null
 if ($LASTEXITCODE -ne 0) {

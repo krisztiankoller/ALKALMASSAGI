@@ -57,6 +57,10 @@ If Podman image pulls fail with `tls: failed to verify certificate: x509`, set
 `"podmanTlsVerify": false` in `proxy.config.json`. If Maven dependency downloads
 fail with `certificate signed by unknown authority` or `PKIX path building failed`,
 set `"mavenTlsVerify": false` too. Details: `PROXY-CONFIG.md`.
+Explicit `podman pull` operations in the build/export scripts are retried 5
+times by default before the script stops; no extra parameter is needed for this.
+Use `-PodmanPullRetries` only if you want more than 5 attempts, and
+`-PodmanPullRetryDelaySeconds` only if you want a different delay.
 
 ## Full rebuild and start order
 
@@ -188,6 +192,7 @@ The host only needs Podman. Maven and JDK run in the `java-build-pod` pod.
 The Maven cache stays inside this project folder at `data\maven-repo`.
 The current build log stays inside this project folder at `data\build-logs\current.log`.
 The script also starts `java-build-log-viewer`, so the same build log is visible in Dozzle at http://localhost:40004.
+The Maven builder image pull is retried 5 times by default.
 
 If internet is available only through an authenticated proxy, fill `proxy.config.json` once and keep the same build command. Details: `PROXY-CONFIG.md`.
 

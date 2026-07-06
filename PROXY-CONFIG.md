@@ -78,6 +78,21 @@ Ez a scriptekben a Podman `pull` es `build` parancsokhoz ezt adja hozza:
 --tls-verify=false
 ```
 
+Az explicit `podman pull` parancsokat a build/export scriptek alapbol 5-szor
+probaljak meg, mielott hibaval megallnak. Ez proxy vagy instabil halozat mogott
+hasznos, mert egy rovid registry/proxy hiba nem allitja meg azonnal az exportot.
+Ehhez normal esetben nem kell semmilyen extra parameter.
+
+Pelda tobb mint 5 probalkozas beallitasara:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\export-offline-bundle.ps1 `
+  -ServicesFile .\services.json `
+  -SkipTests `
+  -PodmanPullRetries 8 `
+  -PodmanPullRetryDelaySeconds 15
+```
+
 Az app image Containerfile nem telepit csomagot `apk add`-dal, ezert az app image
 buildjehez nem kell kulon Alpine TLS workaround. A health check sem hasznal
 `wget` vagy `curl` csomagot.
