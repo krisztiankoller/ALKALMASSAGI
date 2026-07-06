@@ -135,3 +135,52 @@ Ellenorizd ezt a sorrendet:
 6. Be van-e kapcsolva a `Trust server certificate`
 7. Ha portot allitottal, a kliensben is az uj portot hasznalod-e
 
+## MSSQL indulasi hiba uj gepen: `/.system` Access Denied
+
+Hiba pelda:
+
+```text
+Error The system directory [/.system] could not be created
+File LinuxDirectory.cpp 420 Access Denied
+```
+
+Ok: az SQL Server Linux kontener nem root felhasznalokent fut. Uj gepen vagy
+regi Podman volume ujrahasznositasakor elofordulhat, hogy az `mssql-data`
+volume tulajdonosa/jogosultsaga nem irhato a kontener SQL Server
+felhasznalojanak.
+
+A friss `deploy-infra-pods.ps1` ezt automatikusan javitja:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-infra-pods.ps1 `
+  -SqlPassword "Alkalmassagi_2026!" `
+  -ExternalHostName localhost
+```
+
+Offline bundle alol:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-offline.ps1 `
+  -SqlPassword "Alkalmassagi_2026!" `
+  -ExternalHostName localhost
+```
+
+Mit csinal a script:
+
+- ha hianyzik, az `mssql-data` volume-ot SQL Server-kompatibilis
+  tulajdonossal hozza letre;
+- ha mar letezik, egy rovid root helper kontenerrel beallitja a volume-on:
+  `chown -R 10001:0` es `chmod -R g=u`;
+- hozzaadja az MSSQL kontenerhez a `HOME=/var/opt/mssql` beallitast.
+
+Ez nem torli az adatbazisokat. Csak a volume jogosultsagait javitja.
+
+Csak akkor torold a volume-ot, ha biztosan nullarol akarod kezdeni es nem kell
+semmilyen korabbi SQL adat:
+
+```powershell
+podman pod rm -f mssql-pod
+podman volume rm mssql-data
+```
+
+Ezutan futtasd ujra az infra vagy offline indito scriptet.

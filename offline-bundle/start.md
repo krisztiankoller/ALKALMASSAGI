@@ -282,6 +282,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-offline.ps1 `
 `scripts\deploy-infra-pods.ps1`:
 
 - letrehozza a `devnet` Podman networkot, ha hianyzik;
+- letrehozza vagy javitja az `mssql-data` volume jogosultsagait az SQL Server
+  nem-root kontener felhasznalojahoz;
 - elinditja az MSSQL, Kafka, Kafka UI, DbGate, Dozzle es NiFi podokat;
 - beallitja a DbGate kapcsolatokat az app adatbazisokhoz;
 - letrehozza vagy frissiti a NiFi fajlbol Kafka-ba kuldo flow konfiguraciot;
@@ -842,6 +844,47 @@ netstat -ano | findstr ":40000 :40001 :40002 :40003 :40004 :40005 :40006 :40007 
 ```
 
 Megoldas: allitsd le a masik programot, vagy modositsd a portokat a konfiguracioban.
+
+### MSSQL: `The system directory [/.system] could not be created`
+
+Hiba pelda:
+
+```text
+Error The system directory [/.system] could not be created
+File LinuxDirectory.cpp 420 Access Denied
+```
+
+Ok: az SQL Server kontener nem rootkent fut, es az uj gepen az `mssql-data`
+Podman volume jogosultsaga rossz lehet.
+
+Megoldas: friss develop/offline bundle eseten egyszeruen futtasd ujra az indito
+scriptet. A script automatikusan javitja a volume tulajdonjogat es jogait.
+
+Develop branchbol:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-infra-pods.ps1 `
+  -SqlPassword "Alkalmassagi_2026!" `
+  -ExternalHostName localhost
+```
+
+Offline bundle alol:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-offline.ps1 `
+  -SqlPassword "Alkalmassagi_2026!" `
+  -ExternalHostName localhost
+```
+
+Ez adatvesztes nelkuli jogosultsag-javitas. A script az `mssql-data` volume-on
+`10001:0` tulajdonost es csoportirasi jogot allit be.
+
+Csak akkor torold a volume-ot, ha biztosan nem kell semmilyen korabbi SQL adat:
+
+```powershell
+podman pod rm -f mssql-pod
+podman volume rm mssql-data
+```
 
 ### Podman machine nem indul
 

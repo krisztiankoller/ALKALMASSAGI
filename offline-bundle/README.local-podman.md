@@ -144,6 +144,11 @@ Detailed SQL connection documentation: `SQL-SERVER-CONNECTION.md`.
 DbGate opens without a login screen and has preconfigured SQL Server connections:
 `Local MSSQL`, `app1_audit`, `app2_audit`, `app3_audit`, `app4_audit`, `app5_audit`, and `app6_audit`.
 The SQL admin container is started with `NODE_TLS_REJECT_UNAUTHORIZED=0`, so its Node.js runtime accepts self-signed/internal TLS certificates.
+The infra deploy script also repairs the `mssql-data` Podman volume permissions
+for the non-root SQL Server container user. If a new machine shows
+`The system directory [/.system] could not be created`, rerun
+`scripts\deploy-infra-pods.ps1` or `offline-bundle\scripts\run-offline.ps1`;
+the fix is applied automatically without deleting the SQL data volume.
 
 Dozzle opens without a login screen at http://localhost:40004 and shows the logs for the app, SQL Server, Kafka, Kafka UI, DB admin, Java build, and log viewer containers.
 Old container logs are archived before pod recreation under `data\logs`.

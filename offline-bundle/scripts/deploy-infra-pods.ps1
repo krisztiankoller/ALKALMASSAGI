@@ -47,17 +47,19 @@ Localhost-only pelda:
 Mit csinal:
   1. A scripts konyvtar szulojat projektgyokernek veszi.
   2. Letrehozza vagy ellenorzi a Podman networkot.
-  3. Letrehozza az SQL Server volume-ot es a projekt alatti data konyvtarakat.
-  4. DbGate kapcsolatokat general a services.json alapjan.
-  5. Ujra letrehozza az infra podokat, ha mar leteznek.
-  6. Elinditja:
+  3. Letrehozza az SQL Server volume-ot es javitja a volume jogosultsagait.
+     Ez fontos, mert az SQL Server kontener nem rootkent fut.
+  4. Letrehozza a projekt alatti data konyvtarakat.
+  5. DbGate kapcsolatokat general a services.json alapjan.
+  6. Ujra letrehozza az infra podokat, ha mar leteznek.
+  7. Elinditja:
      - mssql-pod / mssql
      - kafka-pod / kafka
      - kafka-ui-pod / kafka-ui
      - sql-admin-pod / sql-admin
      - log-viewer-pod / log-viewer
      - nifi-pod / nifi
-  7. Opcionalisan nifi-flows.yaml alapjan letrehozza a NiFi file-to-Kafka flow-t.
+  8. Opcionalisan nifi-flows.yaml alapjan letrehozza a NiFi file-to-Kafka flow-t.
 
 Fontos:
   Ez a script a podokat ujra letrehozhatja. Az SQL adat volume megmarad,
@@ -239,11 +241,54 @@ function Ensure-Network {
 }
 
 function Ensure-Volume {
-    param([string]$Name)
+    param(
+        [string]$Name,
+        [int]$Uid = -1,
+        [int]$Gid = -1
+    )
 
     podman volume exists $Name 2>$null
     if ($LASTEXITCODE -ne 0) {
-        podman volume create $Name | Out-Null
+        $volumeArgs = [System.Collections.Generic.List[string]]::new()
+        $volumeArgs.Add("volume")
+        $volumeArgs.Add("create")
+        if ($Uid -ge 0) {
+            $volumeArgs.Add("--uid")
+            $volumeArgs.Add([string]$Uid)
+        }
+        if ($Gid -ge 0) {
+            $volumeArgs.Add("--gid")
+            $volumeArgs.Add([string]$Gid)
+        }
+        $volumeArgs.Add($Name)
+        & podman @volumeArgs | Out-Null
+    }
+}
+
+function Repair-MssqlVolumePermissions {
+    param(
+        [string]$VolumeName,
+        [string]$SqlImage
+    )
+
+    Write-Output "Ensuring MSSQL volume permissions for volume '$VolumeName'..."
+    $permissionCommand = "chown -R 10001:0 /var/opt/mssql && chmod -R g=u /var/opt/mssql && chmod -R u+rwX /var/opt/mssql"
+    $podmanArgs = @(
+        "run",
+        "--rm",
+        "--user",
+        "0",
+        "-v",
+        "${VolumeName}:/var/opt/mssql",
+        $SqlImage,
+        "bash",
+        "-lc",
+        $permissionCommand
+    )
+
+    $output = @(& podman @podmanArgs 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not repair MSSQL volume permissions for '$VolumeName'. Output: $($output -join ' ')"
     }
 }
 
@@ -474,7 +519,7 @@ function Set-NifiUnsecuredConfiguration {
 }
 
 Ensure-Network $NetworkName
-Ensure-Volume "mssql-data"
+Ensure-Volume -Name "mssql-data" -Uid 10001 -Gid 0
 New-Item -ItemType Directory -Force -Path $MssqlBackupData | Out-Null
 New-Item -ItemType Directory -Force -Path $KafkaData | Out-Null
 New-Item -ItemType Directory -Force -Path $CloudBeaverData | Out-Null
@@ -517,6 +562,8 @@ if ($LASTEXITCODE -ne 0) {
     throw "Could not create data directories inside Podman WSL distro '$podmanWslDistro'. Output: $($mkdirOutput -join ' ')"
 }
 
+Repair-MssqlVolumePermissions -VolumeName "mssql-data" -SqlImage $SqlImage
+
 Recreate-Pod "mssql-pod" @(
     "--network", $NetworkName,
     "--network-alias", "mssql",
@@ -529,6 +576,7 @@ podman run -d `
     -e "ACCEPT_EULA=Y" `
     -e "MSSQL_SA_PASSWORD=$SqlPassword" `
     -e "MSSQL_PID=Developer" `
+    -e "HOME=/var/opt/mssql" `
     -v "mssql-data:/var/opt/mssql" `
     -v "${MssqlBackupDataWsl}:/var/opt/mssql/backup" `
     $SqlImage

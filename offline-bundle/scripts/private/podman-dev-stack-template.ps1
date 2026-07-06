@@ -31,7 +31,8 @@ Hasznalat, ha tudatosan ezt a template-et akarod probalni:
 
 Mit csinal:
   1. Letrehoz egy Podman networkot.
-  2. Letrehoz mssql-data es kafka-data volume-okat.
+  2. Letrehoz mssql-data es kafka-data volume-okat, es javitja az MSSQL volume
+     jogosultsagait a nem-root SQL Server kontenerhez.
   3. Elindit egy SQL Server podot.
   4. Elindit egy Kafka podot.
   5. Minta app1 pod inditast mutat registry.example.local/app1:latest image-dzsel.
@@ -80,11 +81,53 @@ function Ensure-Network {
 }
 
 function Ensure-Volume {
-    param([string]$Name)
+    param(
+        [string]$Name,
+        [int]$Uid = -1,
+        [int]$Gid = -1
+    )
 
     podman volume exists $Name 2>$null
     if ($LASTEXITCODE -ne 0) {
-        podman volume create $Name | Out-Null
+        $volumeArgs = [System.Collections.Generic.List[string]]::new()
+        $volumeArgs.Add("volume")
+        $volumeArgs.Add("create")
+        if ($Uid -ge 0) {
+            $volumeArgs.Add("--uid")
+            $volumeArgs.Add([string]$Uid)
+        }
+        if ($Gid -ge 0) {
+            $volumeArgs.Add("--gid")
+            $volumeArgs.Add([string]$Gid)
+        }
+        $volumeArgs.Add($Name)
+        & podman @volumeArgs | Out-Null
+    }
+}
+
+function Repair-MssqlVolumePermissions {
+    param(
+        [string]$VolumeName,
+        [string]$SqlImage
+    )
+
+    $permissionCommand = "chown -R 10001:0 /var/opt/mssql && chmod -R g=u /var/opt/mssql && chmod -R u+rwX /var/opt/mssql"
+    $podmanArgs = @(
+        "run",
+        "--rm",
+        "--user",
+        "0",
+        "-v",
+        "${VolumeName}:/var/opt/mssql",
+        $SqlImage,
+        "bash",
+        "-lc",
+        $permissionCommand
+    )
+
+    $output = @(& podman @podmanArgs 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not repair MSSQL volume permissions for '$VolumeName'. Output: $($output -join ' ')"
     }
 }
 
@@ -103,8 +146,9 @@ function Recreate-Pod {
 }
 
 Ensure-Network $NetworkName
-Ensure-Volume "mssql-data"
+Ensure-Volume -Name "mssql-data" -Uid 10001 -Gid 0
 Ensure-Volume "kafka-data"
+Repair-MssqlVolumePermissions -VolumeName "mssql-data" -SqlImage $SqlImage
 
 Recreate-Pod "mssql-pod" @(
     "--network", $NetworkName,
@@ -118,6 +162,7 @@ podman run -d `
     -e "ACCEPT_EULA=Y" `
     -e "MSSQL_SA_PASSWORD=$SqlPassword" `
     -e "MSSQL_PID=Developer" `
+    -e "HOME=/var/opt/mssql" `
     -v "mssql-data:/var/opt/mssql" `
     $SqlImage
 
