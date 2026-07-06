@@ -111,10 +111,28 @@ Ez azt jelenti, hogy Windows/Podman ujrainditas utan megmaradnak:
 
 - NiFi flow definiciok: `data\nifi\conf\flow.json.gz`
 - NiFi beallitasok: `data\nifi\conf\nifi.properties`
+- NiFi indulashoz szukseges alap conf fajlok, peldaul:
+  `data\nifi\conf\bootstrap.conf`
 - NiFi state adatok
 - content/flowfile/provenance repository adatok
 - NiFi sajat alkalmazas logjai
 - drop mappak
+
+Indulaskor a `deploy-infra-pods.ps1` ellenorzi, hogy a NiFi conf mappaban
+megvan-e a minimalisan szukseges fajlkeszlet:
+
+```text
+bootstrap.conf
+nifi.properties
+logback.xml
+state-management.xml
+authorizers.xml
+login-identity-providers.xml
+```
+
+Ha valamelyik hianyzik, a script a NiFi image-bol csak a hianyzo fajlt potolja.
+A mar meglovo `flow.json.gz`, `flow.xml.gz`, `nifi.properties` es repository
+adatok nem torlodnek.
 
 Fontos: a `deploy-infra-pods.ps1` alapbol ujrageneralja a `file-to-kafka`
 process groupot a `nifi-flows.yaml` alapjan. Ez szandekos, mert ebben a
@@ -127,6 +145,39 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-infra-pods.
   -ExternalHostName localhost `
   -SkipNifiConfiguration
 ```
+
+## Hiba: `FileNotFoundException bootstrap.conf`
+
+Hiba pelda a NiFi logban:
+
+```text
+FileNotFoundException /opt/nifi/nifi-current/conf/bootstrap.conf
+```
+
+Ok: a host oldali `data\nifi\conf` mappa bind mountkent bemountolodik a
+kontener `/opt/nifi/nifi-current/conf` mappajara. Ha ez a host mappa hianyos,
+akkor eltakarja az image-ben levo teljes gyari conf mappat, es a NiFi nem talalja
+a `bootstrap.conf` fajlt.
+
+Megoldas friss develop/offline bundle eseten:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-infra-pods.ps1 `
+  -SqlPassword "Alkalmassagi_2026!" `
+  -ExternalHostName localhost
+```
+
+Offline bundle alol:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-offline.ps1 `
+  -SqlPassword "Alkalmassagi_2026!" `
+  -ExternalHostName localhost
+```
+
+Ne torold elsore a teljes `data\nifi` konyvtarat, mert abban vannak a NiFi
+flow/state/repository adatok. A friss script adatvesztes nelkul potolja a
+hianyzo alap conf fajlokat.
 
 ## Fajl bekuldese
 

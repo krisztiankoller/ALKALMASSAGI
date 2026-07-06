@@ -3,7 +3,7 @@ param(
 
     [string]$NetworkName = "devnet",
     [string]$KafkaImage = "apache/kafka-native:3.9.0",
-    [string]$SqlImage = "mcr.microsoft.com/mssql/server:2022-latest",
+    [string]$SqlImage = "mcr.microsoft.com/mssql/server:2019-latest",
     [Alias("h", "?")]
     [switch]$Help
 )
@@ -48,7 +48,7 @@ Parameterek:
       Kafka image. Alapertelmezett: apache/kafka-native:3.9.0
 
   -SqlImage
-      SQL Server image. Alapertelmezett: mcr.microsoft.com/mssql/server:2022-latest
+      SQL Server image. Alapertelmezett: mcr.microsoft.com/mssql/server:2019-latest
 
   --help
       Ezt a reszletes leirast irja ki es nem indit podokat.

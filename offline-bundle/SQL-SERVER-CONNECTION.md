@@ -184,3 +184,46 @@ podman volume rm mssql-data
 ```
 
 Ezutan futtasd ujra az infra vagy offline indito scriptet.
+
+## MSSQL verzio downgrade: `A downgrade path is not supported`
+
+Hiba pelda:
+
+```text
+The database 'master' cannot be opened because it is version 957.
+This server supports version 904 and earlier.
+A downgrade path is not supported.
+```
+
+Ok: az `mssql-data` volume ujabb SQL Serverrel keszult, mint amit most
+inditasz. Pelda: SQL Server 2022 utan SQL Server 2019 image-et hasznalsz.
+
+A friss script ezt automatikusan kezeli, mert ebben a local/offline stackben az
+SQL adat nullarol is indulhat:
+
+- felismeri a downgrade hibauzenetet az MSSQL logban;
+- torli csak az `mssql-data` volume-ot;
+- ujraletrehozza jo jogosultsaggal;
+- ujrainditja az MSSQL podot tiszta adatbazissal.
+
+Ez SQL adatvesztessel jar, de Kafka/NiFi/log adatot nem torol.
+
+Ha `run-offline.ps1`-t hasznalsz, az app podok ujraindulnak az infra utan. Ha
+kezzel csak `deploy-infra-pods.ps1` futott, utana inditsd ujra az appokat is,
+hogy az audit DB-k es tablak ujra letrejojjenek:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-springboot-pods.ps1 `
+  -ServicesFile .\services.json `
+  -SqlPassword "Alkalmassagi_2026!" `
+  -SkipBuild
+```
+
+Ha nem akarod, hogy automatikusan torolje az SQL adatot, inditsd igy:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-infra-pods.ps1 `
+  -SqlPassword "Alkalmassagi_2026!" `
+  -ExternalHostName localhost `
+  -KeepMssqlDataOnVersionMismatch
+```

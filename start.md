@@ -284,6 +284,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-offline.ps1 `
 - letrehozza a `devnet` Podman networkot, ha hianyzik;
 - letrehozza vagy javitja az `mssql-data` volume jogosultsagait az SQL Server
   nem-root kontener felhasznalojahoz;
+- felismeri az MSSQL adatbazisverzio inkompatibilitast, peldaul amikor egy
+  SQL Server 2022-vel keszult `mssql-data` volume-ot SQL Server 2019-cel
+  inditanal, es alapbol torli/ujraletrehozza az `mssql-data` volume-ot;
 - elinditja az MSSQL, Kafka, Kafka UI, DbGate, Dozzle es NiFi podokat;
 - beallitja a DbGate kapcsolatokat az app adatbazisokhoz;
 - letrehozza vagy frissiti a NiFi fajlbol Kafka-ba kuldo flow konfiguraciot;
@@ -337,7 +340,7 @@ Ez tartalmazza az osszes kontener image-et. Internet nelkul ezert tud mukodni a 
 Az `.\offline-bundle\images\podman-images.tar` jelenleg ezeket tartalmazza:
 
 ```text
-mcr.microsoft.com/mssql/server:2022-latest
+mcr.microsoft.com/mssql/server:2019-latest
 apache/kafka-native:3.9.0
 apache/kafka:3.9.0
 ghcr.io/kafbat/kafka-ui:latest
@@ -885,6 +888,99 @@ Csak akkor torold a volume-ot, ha biztosan nem kell semmilyen korabbi SQL adat:
 podman pod rm -f mssql-pod
 podman volume rm mssql-data
 ```
+
+### MSSQL: `A downgrade path is not supported`
+
+Hiba pelda:
+
+```text
+The database 'master' cannot be opened because it is version 957.
+This server supports version 904 and earlier.
+A downgrade path is not supported.
+```
+
+Ok: az `mssql-data` volume egy ujabb SQL Server verzioval keszult, mint amit
+most inditasz. Pelda: a volume SQL Server 2022-vel jott letre, de kesobb a
+scriptet SQL Server 2019 image-dzsel futtatod.
+
+Ebben a projektben ez local/offline fejlesztoi adat, ezert alapbol nem kell
+megorizni. A friss `deploy-infra-pods.ps1` es `run-offline.ps1` ezt automatikusan
+kezeli:
+
+1. Elinditja az MSSQL kontenert.
+2. Rovid ideig figyeli a logot.
+3. Ha downgrade/verzio inkompatibilitast lat, torli az `mssql-data` volume-ot.
+4. Ujraletrehozza a volume-ot jo jogosultsagokkal.
+5. Ujrainditja az MSSQL podot tiszta adatbazissal.
+
+Ez adatvesztessel jar az SQL Server volume-ra nezve, de csak az `mssql-data`
+volume-ot erinti. A Kafka/NiFi/log/adat konyvtarak nem torlodnek emiatt.
+
+Ha `run-offline.ps1`-t futtatsz, az app podok ujrainditasa automatikusan jon az
+infra utan. Ha csak `deploy-infra-pods.ps1`-t futtattal kezzel, utana inditsd
+ujra az app podokat is, hogy ujra letrehozzak az audit adatbazisokat:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-springboot-pods.ps1 `
+  -ServicesFile .\services.json `
+  -SqlPassword "Alkalmassagi_2026!" `
+  -SkipBuild
+```
+
+Ha megis meg akarod allitani a scriptet adatvesztes elott, add meg:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-infra-pods.ps1 `
+  -SqlPassword "Alkalmassagi_2026!" `
+  -ExternalHostName localhost `
+  -KeepMssqlDataOnVersionMismatch
+```
+
+Offline bundle alol ugyanez:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-offline.ps1 `
+  -SqlPassword "Alkalmassagi_2026!" `
+  -ExternalHostName localhost `
+  -KeepMssqlDataOnVersionMismatch
+```
+
+### NiFi: `FileNotFoundException bootstrap.conf`
+
+Hiba pelda:
+
+```text
+FileNotFoundException /opt/nifi/nifi-current/conf/bootstrap.conf
+```
+
+Ok: a projekt `data\nifi\conf` mappaja bind mountkent eltakarja a kontener
+gyari `/opt/nifi/nifi-current/conf` mappajat. Ha a host oldali conf mappa
+hianyos, peldaul csak `nifi.properties` van benne, akkor a NiFi nem talalja a
+`bootstrap.conf` fajlt.
+
+Megoldas: friss develop/offline bundle eseten futtasd ujra az indito scriptet.
+A script most ellenorzi es az image-bol potolja a hianyzo NiFi alap conf
+fajlokat, adatvesztes nelkul.
+
+Develop branchbol:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-infra-pods.ps1 `
+  -SqlPassword "Alkalmassagi_2026!" `
+  -ExternalHostName localhost
+```
+
+Offline bundle alol:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-offline.ps1 `
+  -SqlPassword "Alkalmassagi_2026!" `
+  -ExternalHostName localhost
+```
+
+Ne torold elsore a teljes `data\nifi` konyvtarat, mert abban vannak a NiFi
+flow/state/repository adatok. Csak akkor torold, ha biztosan teljesen nullarol
+akarod kezdeni a NiFi-t.
 
 ### Podman machine nem indul
 

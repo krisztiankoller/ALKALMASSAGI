@@ -4,7 +4,7 @@ param(
     [string]$NetworkName = "devnet",
     [string]$KafkaImage = "apache/kafka-native:3.9.0",
     [string]$KafkaUiImage = "ghcr.io/kafbat/kafka-ui:latest",
-    [string]$SqlImage = "mcr.microsoft.com/mssql/server:2022-latest",
+    [string]$SqlImage = "mcr.microsoft.com/mssql/server:2019-latest",
     [string]$SqlAdminImage = "dbgate/dbgate:latest",
     [string]$LogViewerImage = "amir20/dozzle:latest",
     [string]$NifiImage = "apache/nifi:1.28.1",
@@ -13,6 +13,7 @@ param(
     [string]$LogArchiveDir = "",
     [string]$ExternalHostName = "",
     [int]$MssqlHostPort = 40000,
+    [int]$MssqlVersionCheckSeconds = 30,
     [int]$KafkaExternalHostPort = 40001,
     [int]$KafkaUiHostPort = 40002,
     [int]$SqlAdminHostPort = 40003,
@@ -21,6 +22,7 @@ param(
     [int]$NifiWaitTimeoutSeconds = 240,
     [switch]$SkipLogArchive,
     [switch]$SkipNifiConfiguration,
+    [switch]$KeepMssqlDataOnVersionMismatch,
     [Alias("h", "?")]
     [switch]$Help
 )
@@ -97,6 +99,16 @@ Parameterek:
 
   -MssqlHostPort
       SQL Server host port. Alapertelmezett: 40000
+
+  -MssqlVersionCheckSeconds
+      Ennyi masodpercig figyeli az MSSQL indulasi logot verzio inkompatibilitas
+      miatt. Alapertelmezett: 30
+
+  -KeepMssqlDataOnVersionMismatch
+      Ha SQL Server downgrade/verzio inkompatibilitas latszik, ne torolje az
+      mssql-data volume-ot, hanem alljon meg hibaval. Alapertelmezetten a script
+      torli es ujraletrehozza az mssql-data volume-ot, mert ez a local/offline
+      fejlesztoi stack nullarol is indulhat.
 
   -KafkaExternalHostPort
       Kafka kulso host port. Alapertelmezett: 40001
@@ -292,6 +304,58 @@ function Repair-MssqlVolumePermissions {
     }
 }
 
+function Test-MssqlVersionMismatch {
+    param(
+        [string]$ContainerName,
+        [int]$TimeoutSeconds
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $logs = @(& podman logs $ContainerName 2>&1)
+        $text = $logs -join "`n"
+
+        if ($text -match "A downgrade path is not supported" -or
+            ($text -match "cannot be opened because it is version" -and $text -match "This server supports version") -or
+            $text -match "Error:\s*948") {
+            return $true
+        }
+
+        if ($text -match "SQL Server is now ready for client connections" -or
+            $text -match "Recovery is complete") {
+            return $false
+        }
+
+        $state = @(& podman inspect $ContainerName --format "{{.State.Status}}" 2>$null)
+        if ($LASTEXITCODE -eq 0 -and (($state -join " ") -match "^(exited|dead)$")) {
+            return $false
+        }
+
+        Start-Sleep -Seconds 2
+    } while ((Get-Date) -lt $deadline)
+
+    return $false
+}
+
+function Reset-MssqlDataVolume {
+    param(
+        [string]$VolumeName,
+        [string]$SqlImage
+    )
+
+    Write-Output "Resetting incompatible MSSQL data volume '$VolumeName'. SQL data will start from zero."
+
+    podman pod exists "mssql-pod" 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        Save-PodLogs -Name "mssql-pod"
+        podman pod rm -f "mssql-pod" | Out-Null
+    }
+
+    podman volume rm -f $VolumeName | Out-Null
+    Ensure-Volume -Name $VolumeName -Uid 10001 -Gid 0
+    Repair-MssqlVolumePermissions -VolumeName $VolumeName -SqlImage $SqlImage
+}
+
 function Save-PodLogs {
     param([string]$Name)
 
@@ -341,6 +405,42 @@ function Recreate-Pod {
     }
 
     podman pod create --name $Name @PodArgs | Out-Null
+}
+
+function Start-MssqlPod {
+    param(
+        [string]$NetworkName,
+        [int]$MssqlHostPort,
+        [string]$SqlPassword,
+        [string]$SqlImage,
+        [string]$MssqlBackupDataWsl
+    )
+
+    Recreate-Pod "mssql-pod" @(
+        "--network", $NetworkName,
+        "--network-alias", "mssql",
+        "--publish", "0.0.0.0:${MssqlHostPort}:1433"
+    )
+
+    $podmanArgs = @(
+        "run",
+        "-d",
+        "--pod", "mssql-pod",
+        "--name", "mssql",
+        "-e", "ACCEPT_EULA=Y",
+        "-e", "MSSQL_SA_PASSWORD=$SqlPassword",
+        "-e", "MSSQL_PID=Developer",
+        "-e", "HOME=/var/opt/mssql",
+        "-v", "mssql-data:/var/opt/mssql",
+        "-v", "${MssqlBackupDataWsl}:/var/opt/mssql/backup",
+        $SqlImage
+    )
+
+    $output = @(& podman @podmanArgs 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not start MSSQL container. Output: $($output -join ' ')"
+    }
+    $output | ForEach-Object { Write-Output $_ }
 }
 
 function Ensure-CloudBeaverConfiguration {
@@ -445,34 +545,71 @@ function Sync-NifiConfigurationData {
         [string]$TemplatePropertiesPath
     )
 
-    $nifiPropertiesPath = Join-Path $ConfPath "nifi.properties"
-    podman container exists nifi 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        podman cp "nifi:/opt/nifi/nifi-current/conf/." $ConfPath | Out-Null
-        if (Test-Path -LiteralPath $nifiPropertiesPath) {
-            return
+    $requiredConfigFiles = @(
+        "bootstrap.conf",
+        "nifi.properties",
+        "logback.xml",
+        "state-management.xml",
+        "authorizers.xml",
+        "login-identity-providers.xml"
+    )
+
+    function Get-MissingNifiConfigFiles {
+        param(
+            [string]$Path,
+            [string[]]$RequiredFiles
+        )
+
+        return @($RequiredFiles | Where-Object {
+                -not (Test-Path -LiteralPath (Join-Path $Path $_) -PathType Leaf)
+            })
+    }
+
+    function Copy-MissingNifiConfigFilesFromImage {
+        param(
+            [string]$NifiImage,
+            [string]$TargetPath,
+            [string[]]$RequiredFiles
+        )
+
+        foreach ($file in $RequiredFiles) {
+            $target = Join-Path $TargetPath $file
+            if (Test-Path -LiteralPath $target -PathType Leaf) {
+                continue
+            }
+
+            $source = "/opt/nifi/nifi-current/conf/$file"
+            $readCommand = "if [ -f '$source' ]; then base64 '$source' | tr -d '\n'; else exit 44; fi"
+            $encodedOutput = @(& podman run --rm --entrypoint bash $NifiImage -lc $readCommand 2>&1)
+            if ($LASTEXITCODE -eq 0) {
+                $encoded = ($encodedOutput -join "").Trim()
+                [System.IO.File]::WriteAllBytes($target, [System.Convert]::FromBase64String($encoded))
+            } elseif ($file -eq "nifi.properties" -and (Test-Path -LiteralPath $TemplatePropertiesPath -PathType Leaf)) {
+                Copy-Item -LiteralPath $TemplatePropertiesPath -Destination $target -Force
+            } else {
+                Write-Output "Could not copy NiFi config file '$file' from image '$NifiImage'. Output: $($encodedOutput -join ' ')"
+            }
         }
     }
 
-    if (Test-Path -LiteralPath $nifiPropertiesPath) {
-        return
-    }
+    New-Item -ItemType Directory -Force -Path $ConfPath | Out-Null
 
-    $tempContainerName = "nifi-conf-template-$([guid]::NewGuid().ToString('N'))"
-    try {
-        podman create --name $tempContainerName $NifiImage | Out-Null
-        podman cp "${tempContainerName}:/opt/nifi/nifi-current/conf/." $ConfPath | Out-Null
-    }
-    finally {
-        podman rm -f $tempContainerName 2>$null | Out-Null
-    }
-
-    if (-not (Test-Path -LiteralPath $nifiPropertiesPath) -and (Test-Path -LiteralPath $TemplatePropertiesPath)) {
+    $nifiPropertiesPath = Join-Path $ConfPath "nifi.properties"
+    if ((-not (Test-Path -LiteralPath $nifiPropertiesPath -PathType Leaf)) -and
+        (Test-Path -LiteralPath $TemplatePropertiesPath -PathType Leaf)) {
         Copy-Item -LiteralPath $TemplatePropertiesPath -Destination $nifiPropertiesPath -Force
     }
 
-    if (-not (Test-Path -LiteralPath $nifiPropertiesPath)) {
-        throw "Could not create NiFi properties file: $nifiPropertiesPath. Check that image '$NifiImage' contains /opt/nifi/nifi-current/conf/nifi.properties."
+    $missingFiles = @(Get-MissingNifiConfigFiles -Path $ConfPath -RequiredFiles $requiredConfigFiles)
+    if ($missingFiles.Count -eq 0) {
+        return
+    }
+
+    Copy-MissingNifiConfigFilesFromImage -NifiImage $NifiImage -TargetPath $ConfPath -RequiredFiles $requiredConfigFiles
+
+    $missingFiles = @(Get-MissingNifiConfigFiles -Path $ConfPath -RequiredFiles $requiredConfigFiles)
+    if ($missingFiles.Count -gt 0) {
+        throw "Could not create required NiFi config files in '$ConfPath': $($missingFiles -join ', '). Check that image '$NifiImage' contains /opt/nifi/nifi-current/conf."
     }
 }
 
@@ -564,22 +701,27 @@ if ($LASTEXITCODE -ne 0) {
 
 Repair-MssqlVolumePermissions -VolumeName "mssql-data" -SqlImage $SqlImage
 
-Recreate-Pod "mssql-pod" @(
-    "--network", $NetworkName,
-    "--network-alias", "mssql",
-    "--publish", "0.0.0.0:${MssqlHostPort}:1433"
-)
+Start-MssqlPod `
+    -NetworkName $NetworkName `
+    -MssqlHostPort $MssqlHostPort `
+    -SqlPassword $SqlPassword `
+    -SqlImage $SqlImage `
+    -MssqlBackupDataWsl $MssqlBackupDataWsl
 
-podman run -d `
-    --pod mssql-pod `
-    --name mssql `
-    -e "ACCEPT_EULA=Y" `
-    -e "MSSQL_SA_PASSWORD=$SqlPassword" `
-    -e "MSSQL_PID=Developer" `
-    -e "HOME=/var/opt/mssql" `
-    -v "mssql-data:/var/opt/mssql" `
-    -v "${MssqlBackupDataWsl}:/var/opt/mssql/backup" `
-    $SqlImage
+if (Test-MssqlVersionMismatch -ContainerName "mssql" -TimeoutSeconds $MssqlVersionCheckSeconds) {
+    if ($KeepMssqlDataOnVersionMismatch) {
+        throw "MSSQL data volume 'mssql-data' is incompatible with image '$SqlImage'. A downgrade path is not supported. Remove -KeepMssqlDataOnVersionMismatch or use a compatible newer SQL Server image."
+    }
+
+    Write-Output "Detected MSSQL data version mismatch with image '$SqlImage'. The local/offline stack will reset SQL data and start from zero."
+    Reset-MssqlDataVolume -VolumeName "mssql-data" -SqlImage $SqlImage
+    Start-MssqlPod `
+        -NetworkName $NetworkName `
+        -MssqlHostPort $MssqlHostPort `
+        -SqlPassword $SqlPassword `
+        -SqlImage $SqlImage `
+        -MssqlBackupDataWsl $MssqlBackupDataWsl
+}
 
 Recreate-Pod "kafka-pod" @(
     "--network", $NetworkName,

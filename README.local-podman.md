@@ -149,6 +149,12 @@ for the non-root SQL Server container user. If a new machine shows
 `The system directory [/.system] could not be created`, rerun
 `scripts\deploy-infra-pods.ps1` or `offline-bundle\scripts\run-offline.ps1`;
 the fix is applied automatically without deleting the SQL data volume.
+If the SQL image is downgraded, for example from SQL Server 2022 to SQL Server
+2019, the existing `mssql-data` volume can be too new for the older server. In
+that case the deploy script detects `A downgrade path is not supported`, removes
+only the `mssql-data` volume, recreates it, and starts SQL Server from zero.
+Use `-KeepMssqlDataOnVersionMismatch` only when you want the script to stop
+instead of resetting the local SQL data.
 
 Dozzle opens without a login screen at http://localhost:40004 and shows the logs for the app, SQL Server, Kafka, Kafka UI, DB admin, Java build, and log viewer containers.
 Old container logs are archived before pod recreation under `data\logs`.
@@ -158,6 +164,10 @@ Apache NiFi opens without a login screen at http://localhost:40011/nifi.
 Its file-to-Kafka flow is generated from `nifi-flows.yaml`; drop folders are under `data\nifi\drop`.
 NiFi configuration, including `nifi.properties`, flow state, repositories and NiFi application logs are persisted under `data\nifi`.
 The repository also contains a base NiFi properties template at `config\nifi\nifi.properties`.
+On startup the infra deploy script validates the required NiFi conf files such
+as `bootstrap.conf`, `logback.xml`, and `state-management.xml`. If a copied
+machine has a partial `data\nifi\conf` folder, the script restores only the
+missing base files from the NiFi image without deleting existing flow/state data.
 
 ## Kafka connection
 

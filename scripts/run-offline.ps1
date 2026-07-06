@@ -5,12 +5,13 @@ param(
     [string]$NetworkName = "devnet",
     [string]$KafkaImage = "apache/kafka-native:3.9.0",
     [string]$KafkaUiImage = "ghcr.io/kafbat/kafka-ui:latest",
-    [string]$SqlImage = "mcr.microsoft.com/mssql/server:2022-latest",
+    [string]$SqlImage = "mcr.microsoft.com/mssql/server:2019-latest",
     [string]$SqlAdminImage = "dbgate/dbgate:latest",
     [string]$LogViewerImage = "amir20/dozzle:latest",
     [string]$NifiImage = "apache/nifi:1.28.1",
     [string]$ExternalHostName = "",
     [int]$MssqlHostPort = 40000,
+    [int]$MssqlVersionCheckSeconds = 30,
     [int]$KafkaExternalHostPort = 40001,
     [int]$KafkaUiHostPort = 40002,
     [int]$SqlAdminHostPort = 40003,
@@ -18,6 +19,7 @@ param(
     [int]$NifiHostPort = 40011,
     [int]$NifiWaitTimeoutSeconds = 240,
     [switch]$SkipNifiConfiguration,
+    [switch]$KeepMssqlDataOnVersionMismatch,
     [Alias("h", "?")]
     [switch]$Help
 )
@@ -73,6 +75,16 @@ Parameterek:
 
   -MssqlHostPort
       SQL Server host port. Alapertelmezett: 40000
+
+  -MssqlVersionCheckSeconds
+      Ennyi masodpercig figyeli az MSSQL indulasi logot downgrade/verzio
+      inkompatibilitas miatt. Alapertelmezett: 30
+
+  -KeepMssqlDataOnVersionMismatch
+      Ha az mssql-data volume ujabb SQL Serverrel keszult, mint amit most
+      inditasz, ne torolje automatikusan a volume-ot, hanem alljon meg hibaval.
+      Alapertelmezetten offline/local inditasnal a script torli es nullarol
+      ujraletrehozza az SQL adatokat.
 
   -KafkaExternalHostPort
       Kafka kulso host port. Alapertelmezett: 40001
@@ -171,13 +183,15 @@ podman load --input $archivePath
     -NifiConfigFile (Join-Path $BundleDir "nifi-flows.yaml") `
     -ExternalHostName $ExternalHostName `
     -MssqlHostPort $MssqlHostPort `
+    -MssqlVersionCheckSeconds $MssqlVersionCheckSeconds `
     -KafkaExternalHostPort $KafkaExternalHostPort `
     -KafkaUiHostPort $KafkaUiHostPort `
     -SqlAdminHostPort $SqlAdminHostPort `
     -LogViewerHostPort $LogViewerHostPort `
     -NifiHostPort $NifiHostPort `
     -NifiWaitTimeoutSeconds $NifiWaitTimeoutSeconds `
-    -SkipNifiConfiguration:$SkipNifiConfiguration
+    -SkipNifiConfiguration:$SkipNifiConfiguration `
+    -KeepMssqlDataOnVersionMismatch:$KeepMssqlDataOnVersionMismatch
 
 & $appsScript `
     -ServicesFile $servicesFile `

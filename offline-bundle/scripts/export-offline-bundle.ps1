@@ -5,7 +5,7 @@ param(
     [string]$KafkaImage = "apache/kafka-native:3.9.0",
     [string]$KafkaCliImage = "apache/kafka:3.9.0",
     [string]$KafkaUiImage = "ghcr.io/kafbat/kafka-ui:latest",
-    [string]$SqlImage = "mcr.microsoft.com/mssql/server:2022-latest",
+    [string]$SqlImage = "mcr.microsoft.com/mssql/server:2019-latest",
     [string]$SqlAdminImage = "dbgate/dbgate:latest",
     [string]$LogViewerImage = "amir20/dozzle:latest",
     [string]$NifiImage = "apache/nifi:1.28.1",
