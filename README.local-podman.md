@@ -26,6 +26,35 @@
 - Log viewer guide: `LOG-VIEWER.md`
 - Log persistence guide: `LOG-PERSISTENCE.md`
 
+## First run on a new machine from develop
+
+Use this when the `develop` branch is checked out and the offline image archive
+does not exist yet. Run from a normal non-admin PowerShell window:
+
+```powershell
+cd "<project-folder>"
+
+Get-ChildItem -Recurse -File | Unblock-File
+
+podman machine start
+if ($LASTEXITCODE -ne 0) {
+  podman machine init
+  podman machine start
+}
+
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\export-offline-bundle.ps1 `
+  -ServicesFile .\services.json `
+  -SkipTests
+
+powershell -NoProfile -ExecutionPolicy Bypass -File .\offline-bundle\scripts\run-offline.ps1 `
+  -SqlPassword "Alkalmassagi_2026!" `
+  -ExternalHostName localhost
+```
+
+If the machine is behind an authenticated proxy, fill `proxy.config.json` first.
+If Podman image pulls fail with `tls: failed to verify certificate: x509`, set
+`"podmanTlsVerify": false` in `proxy.config.json`. Details: `PROXY-CONFIG.md`.
+
 ## SQL Server connection
 
 - From containers: `mssql:1433`

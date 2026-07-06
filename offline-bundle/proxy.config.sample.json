@@ -4,6 +4,7 @@
   "httpsProxy": "http://proxy.ceg.local:8080",
   "username": "DOMAIN\\user",
   "password": "change-me",
+  "podmanTlsVerify": true,
   "noProxy": [
     "localhost",
     "127.0.0.1",
@@ -21,4 +22,3 @@
     "app6"
   ]
 }
-

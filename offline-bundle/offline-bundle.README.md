@@ -9,7 +9,15 @@ If this build machine is behind an authenticated proxy, fill `proxy.config.json`
 2. Run:
 
 ```powershell
-.\scripts\export-offline-bundle.ps1 -ServicesFile .\services.json -SkipTests
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\export-offline-bundle.ps1 `
+  -ServicesFile .\services.json `
+  -SkipTests
+```
+
+If the project was downloaded as a ZIP or copied from a browser download, first run:
+
+```powershell
+Get-ChildItem -Recurse -File | Unblock-File
 ```
 
 The script builds the service images and saves all required images into:
@@ -28,7 +36,9 @@ No Windows admin rights are needed for localhost-only use. Do not run `scripts\c
 No internet or proxy is needed for running an already exported offline bundle.
 
 ```powershell
-.\scripts\run-offline.ps1 -SqlPassword 'YourStrongPassword123!' -ExternalHostName localhost
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-offline.ps1 `
+  -SqlPassword 'YourStrongPassword123!' `
+  -ExternalHostName localhost
 ```
 
 This loads the image archive, starts SQL Server and Kafka, then starts every Spring Boot service from `services.json`.
@@ -46,7 +56,7 @@ http://localhost:40011/nifi  Apache NiFi
 Every script supports detailed help:
 
 ```powershell
-.\scripts\run-offline.ps1 --help
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-offline.ps1 --help
 ```
 
 ## Notes

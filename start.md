@@ -2,6 +2,108 @@
 
 Ez a dokumentum azt irja le, hogyan kell a teljes rendszert atvinni es elinditani egy masik Windows gepen ugy, hogy azon csak Podman legyen telepitve, internet ne legyen, Java/Maven ne legyen, es Windows admin jog se kelljen.
 
+## Uj gep develop branchbol, internet/proxy mellett
+
+Ezt hasznald akkor, ha az uj gepen a GitHub `develop` branch van meg, nincs meg kesz
+`offline-bundle\images\podman-images.tar`, es ezen a gepen kell mindent letolteni,
+leforditani, image-et epiteni, offline bundle-t generalni, majd elinditani.
+
+Feltetelek:
+
+```text
+Podman Desktop vagy Podman CLI telepitve van
+Podman machine / WSL backend mukodik
+internet elerheto, ha kell proxy mogott
+Java es Maven NEM kell a host gepre
+admin jog NEM kell localhost hasznalathoz
+```
+
+Ha a projekt ZIP-kent vagy bongeszobol letoltve kerult a gepre, a Windows
+megjelolheti a `.ps1` fajlokat internetrol letoltottkent. Ez okozza a
+`not digitally signed` PowerShell hibat. Ezert az elso lepes mindig az unblock.
+
+Nyiss egy normal, nem admin PowerShell ablakot, menj a projekt gyokerebe, majd
+futtasd ezt a teljes blokkot:
+
+```powershell
+cd "<ahova-klonoztad-vagy-kicsomagoltad>\ALKALMASSAGI"
+
+# Ha a fajlok internetrol letoltottnek vannak jelolve, ez leveszi a blokkot.
+Get-ChildItem -Recurse -File | Unblock-File
+
+# Podman machine inditasa. Ha meg nincs letrehozva, elobb inicializalja.
+podman machine start
+if ($LASTEXITCODE -ne 0) {
+  podman machine init
+  podman machine start
+}
+
+podman info
+
+# Build + image pull + app image build + offline bundle generalas.
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\export-offline-bundle.ps1 `
+  -ServicesFile .\services.json `
+  -SkipTests
+
+# A frissen generalt offline bundle inditasa localhost-only modban.
+powershell -NoProfile -ExecutionPolicy Bypass -File .\offline-bundle\scripts\run-offline.ps1 `
+  -SqlPassword "Alkalmassagi_2026!" `
+  -ExternalHostName localhost
+
+podman pod ps
+podman ps --pod
+```
+
+Ha proxy mogott vagy, elotte toltsd ki a projekt gyokereben:
+
+```text
+.\proxy.config.json
+```
+
+Pelda:
+
+```json
+{
+  "enabled": true,
+  "httpProxy": "http://proxy.ceg.local:8080",
+  "httpsProxy": "http://proxy.ceg.local:8080",
+  "username": "DOMAIN\\user",
+  "password": "secret",
+  "podmanTlsVerify": false,
+  "noProxy": [
+    "localhost",
+    "127.0.0.1",
+    ".ceg.local",
+    "mssql",
+    "kafka",
+    "kafka-ui",
+    "sql-admin",
+    "nifi",
+    "app1",
+    "app2",
+    "app3",
+    "app4",
+    "app5",
+    "app6"
+  ]
+}
+```
+
+Fontos: a `podmanTlsVerify: false` csak akkor kell, ha ceges TLS inspection/proxy
+miatt ilyen Podman hibat kapsz:
+
+```text
+tls: failed to verify certificate: x509
+```
+
+Ez a Podman `pull` es `build` parancsokhoz automatikusan hozzaadja:
+
+```text
+--tls-verify=false
+```
+
+Ha nincs ilyen cert hiba, hagyd `true` erteken.
+
 ## Mit kell atmasolni?
 
 A teljes projektmappat masold at, vagy legalabb az `offline-bundle` mappat.
@@ -399,6 +501,67 @@ podman volume rm mssql-data
 
 ## Ha hibat kapsz
 
+### PowerShell: not digitally signed
+
+Hiba pelda:
+
+```text
+... cannot be loaded. The file ... is not digitally signed.
+```
+
+Ok: a Windows ugy latja, hogy a `.ps1` fajlok internetrol letoltott fajlok.
+
+Megoldas a projekt gyokereben:
+
+```powershell
+Get-ChildItem -Recurse -File | Unblock-File
+```
+
+Ezutan a scripteket mindig igy futtasd:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\<script-nev>.ps1
+```
+
+Pelda:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\export-offline-bundle.ps1 `
+  -ServicesFile .\services.json `
+  -SkipTests
+```
+
+### Podman: tls failed to verify certificate x509
+
+Hiba pelda:
+
+```text
+tls: failed to verify certificate: x509
+```
+
+Gyors workaround ceges proxy/TLS inspection mogott: a projekt gyokerben a
+`proxy.config.json` fajlban allitsd:
+
+```json
+{
+  "podmanTlsVerify": false
+}
+```
+
+Ezutan futtasd ujra az exportot:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\export-offline-bundle.ps1 `
+  -ServicesFile .\services.json `
+  -SkipTests
+```
+
+Hosszu tavon jobb megoldas a ceges CA importalasa a Podman machine-be. Reszletek:
+
+```text
+.\PROXY-CONFIG.md
+```
+
 ### Missing image archive
 
 Hiba pelda:
@@ -536,6 +699,31 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\export-offline-bun
 - A masik gepen csak az `offline-bundle` mappabol inditsd a `scripts\run-offline.ps1` scriptet.
 
 ## Rovid parancslista
+
+Uj gepen, `develop` branchbol, internet/proxy mellett, builddel egyutt:
+
+```powershell
+cd "<ahova-klonoztad-vagy-kicsomagoltad>\ALKALMASSAGI"
+
+Get-ChildItem -Recurse -File | Unblock-File
+
+podman machine start
+if ($LASTEXITCODE -ne 0) {
+  podman machine init
+  podman machine start
+}
+
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\export-offline-bundle.ps1 `
+  -ServicesFile .\services.json `
+  -SkipTests
+
+powershell -NoProfile -ExecutionPolicy Bypass -File .\offline-bundle\scripts\run-offline.ps1 `
+  -SqlPassword "Alkalmassagi_2026!" `
+  -ExternalHostName localhost
+
+podman pod ps
+podman ps --pod
+```
 
 Masik gepen, offline, admin jog nelkul:
 
