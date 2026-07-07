@@ -1,4 +1,4 @@
-# ALKALMASSAGI local Podman stack
+﻿# ALKALMASSAGI local Podman stack
 
 ## Current infra pods
 
@@ -64,6 +64,10 @@ Use `-PodmanPullRetries` only if you want more than 5 attempts, and
 The Maven build itself is also retried 5 times by default, so transient Maven
 repository/proxy failures do not stop the build immediately. Unlike Podman
 pull retries, Maven build retries can be lowered to 1 with `-MavenBuildRetries 1`.
+For corporate Nexus or Artifactory settings, put your complete local Maven
+settings in `maven-settings.local.xml` and reference it from `proxy.config.json`
+with `mavenSettingsFile`. The app build uses it with `mvn -s`; the file is
+ignored by Git because it can contain credentials.
 
 ## Full rebuild and start order
 
@@ -230,3 +234,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\configure-lan-fire
 ```
 
 This creates Windows firewall rules and `netsh interface portproxy` entries for the infra and service ports.
+

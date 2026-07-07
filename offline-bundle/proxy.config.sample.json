@@ -1,4 +1,4 @@
-{
+﻿{
   "enabled": false,
   "httpProxy": "http://proxy.ceg.local:8080",
   "httpsProxy": "http://proxy.ceg.local:8080",
@@ -6,6 +6,7 @@
   "password": "change-me",
   "podmanTlsVerify": true,
   "mavenTlsVerify": true,
+  "mavenSettingsFile": "maven-settings.local.xml",
   "noProxy": [
     "localhost",
     "127.0.0.1",
@@ -23,3 +24,4 @@
     "app6"
   ]
 }
+

@@ -1,4 +1,4 @@
-# Proxy configuration
+﻿# Proxy configuration
 
 Ez a dokumentum azt irja le, mit kell csinalni akkor, ha van internet, de csak authentikalt HTTP/HTTPS proxy mogott.
 
@@ -204,32 +204,109 @@ Mit csinal a script?
 
 1. Beallitja a `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` valtozokat a Podman parancsokhoz.
 2. Atadja ezeket a Maven kontenernek.
-3. General egy Maven proxy beallitast ide:
+3. Ha nincs kulon Maven settings megadva, proxy eseten generalhat egy minimalis
+   Maven proxy settings fajlt ide:
 
 ```text
 .\data\maven-repo\settings.xml
 ```
 
-Ez azert kell, mert a Maven/Java nem mindig elegszik meg az operacios rendszer proxy env valtozoival.
+Ha ceges Nexus/Artifactory repositorykhoz sajat `servers`, `profiles`,
+`repositories`, `pluginRepositories` es proxy beallitas kell, akkor inkabb adj
+meg egy teljes sajat Maven settings fajlt. Ezt a build kontener csak az appok
+forditasahoz kapja meg, read-only mounttal:
+
+```text
+.\maven-settings.local.xml
+```
+
+## Kulon Maven settings csak app buildhez
+
+Masold vagy keszitsd el a ceges Maven settings fajlt a projekt gyokerebe:
+
+```text
+.\maven-settings.local.xml
+```
+
+Tehat a beallitas helye:
+
+```text
+ALKALMASSAGI\
+  proxy.config.json
+  maven-settings.local.xml
+```
+
+A `proxy.config.json` mondja meg, hogy melyik Maven settings fajlt hasznalja az
+app build:
+
+```json
+{
+  "mavenSettingsFile": "maven-settings.local.xml"
+}
+```
+
+Ezt a fajlt a `.gitignore` kizarja, mert tartalmazhat jelszot. A fajlban legyen
+benne minden, ami Mavennek kell:
+
+- ceges repository es plugin repository;
+- `servers` a repository credentialokkal;
+- `proxies`, ha Mavennek proxy is kell;
+- `activeProfiles`, ha profilbol jonnek a repositoryk.
+
+A `proxy.config.json`-ban csak az utvonalat kell megadni:
+
+```json
+{
+  "enabled": true,
+  "httpProxy": "http://proxy.ceg.local:8080",
+  "httpsProxy": "http://proxy.ceg.local:8080",
+  "username": "DOMAIN\\proxy-user",
+  "password": "proxy-password",
+  "mavenSettingsFile": "maven-settings.local.xml"
+}
+```
+
+Buildkor a script ezt csinalja:
+
+```text
+maven-settings.local.xml -> /maven-settings/maven-settings.local.xml
+mvn -s /maven-settings/maven-settings.local.xml clean package
+```
+
+Ez csak a `build-apps-with-podman.ps1` Maven buildre vonatkozik. Nem modositja
+a `maven-settings.local.xml` fajlt, nem masolja be a Gitbe, es nem hasznalja az
+infra/app runtime inditasnal.
+
+Parancssori feluliras is lehetseges:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-apps-with-podman.ps1 `
+  -SkipTests `
+  -MavenSettingsFile .\maven-settings.local.xml
+```
+
+Ha az offline bundle mappabol akarsz ujraforditani, akkor ugyanez az
+`offline-bundle` gyokerehez kepest ertendo:
+
+```text
+offline-bundle\
+  proxy.config.json
+  maven-settings.local.xml
+```
 
 ## Fontos a jelszavakrol
 
-Ha a `proxy.config.json` tartalmaz jelszot, a script a Maven miatt letrehozhatja ezt:
-
-```text
-.\data\maven-repo\settings.xml
-```
-
-Ez tartalmazhat proxy credentialt plain text formaban.
+A `maven-settings.local.xml` es a kitoltott `proxy.config.json` tartalmazhat
+plain text jelszot.
 
 Javaslat:
 
-- Ne add tovabb ezt a fajlt, ha ceges proxy jelszot tartalmaz.
-- Ne add tovabb a kitoltott `proxy.config.json` fajlt, ha ceges proxy jelszot tartalmaz.
-- Offline bundle futtatashoz nincs szukseg erre a proxy settings fajlra.
+- Ne add tovabb ezeket a fajlokat, ha ceges proxy vagy repository jelszot tartalmaznak.
+- Offline bundle futtatashoz nincs szukseg proxy configra vagy Maven settingsre.
 - Ha mar kesz az offline bundle, a masik gepre eleg az `offline-bundle` mappa.
 
-Torles, ha mar nincs ra szukseg:
+Ha regebbrol mar van generalt proxy settingsed es kulon settings fajlt akarsz
+hasznalni, torolheted:
 
 ```powershell
 Remove-Item .\data\maven-repo\settings.xml -Force
@@ -364,3 +441,5 @@ Ha certificate hiba van:
 - importald a corporate CA-t a Windows trust store-ba;
 - futtasd: `podman machine set --import-native-ca podman-machine-default`;
 - Maven/Java certificate hibanal Java truststore szintu beallitas is kellhet.
+
+

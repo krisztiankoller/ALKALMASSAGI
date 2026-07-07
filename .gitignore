@@ -12,6 +12,8 @@
 
 # Local machine/proxy secrets
 /proxy.config.json
+/maven-settings.local.xml
+/maven-settings*.local.xml
 
 # Local logs and temporary files
 *.log

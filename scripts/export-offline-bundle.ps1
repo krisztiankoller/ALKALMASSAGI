@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$ServicesFile,
     [string]$BundleDir = "",
     [string]$NetworkName = "devnet",
@@ -715,3 +715,4 @@ $manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $Bund
 $bundleDisplayPath = Format-ProjectRelativePath -Path $BundleDir -Root $ProjectRoot
 Write-Output "Offline bundle created: $bundleDisplayPath"
 Write-Output "Copy this whole folder to the target machine and run: .\scripts\run-offline.ps1 -SqlPassword '<password>'"
+

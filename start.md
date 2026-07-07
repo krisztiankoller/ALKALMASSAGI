@@ -1,4 +1,4 @@
-# Start guide - offline Podman stack 
+﻿# Start guide - offline Podman stack 
 
 Ez a dokumentum azt irja le, hogyan kell a teljes rendszert atvinni es elinditani egy masik Windows gepen ugy, hogy azon csak Podman legyen telepitve, internet ne legyen, Java/Maven ne legyen, es Windows admin jog se kelljen.
 
@@ -71,6 +71,7 @@ Pelda:
   "password": "secret",
   "podmanTlsVerify": false,
   "mavenTlsVerify": false,
+  "mavenSettingsFile": "maven-settings.local.xml",
   "noProxy": [
     "localhost",
     "127.0.0.1",
@@ -89,6 +90,31 @@ Pelda:
   ]
 }
 ```
+
+A `mavenSettingsFile` csak az appok Maven forditasahoz kell. Ebbe a sajat
+settings fajlba tedd a ceges repository, server credential es Maven proxy
+beallitasokat. A script ezt read-only mountolja a build kontenerbe, es igy
+futtatja a Maven buildet:
+
+```text
+mvn -s /maven-settings/maven-settings.local.xml clean package
+```
+
+A fajlok helye develop checkoutban:
+
+```text
+.\proxy.config.json
+.\maven-settings.local.xml
+```
+
+Offline bundle mappabol inditott buildnel:
+
+```text
+.\offline-bundle\proxy.config.json
+.\offline-bundle\maven-settings.local.xml
+```
+
+A `maven-settings.local.xml` gitignore alatt van, mert tartalmazhat jelszot.
 
 Fontos: a `podmanTlsVerify: false` csak akkor kell, ha ceges TLS inspection/proxy
 miatt ilyen Podman hibat kapsz:
@@ -1275,3 +1301,4 @@ http://localhost:40008/actuator/health
 http://localhost:40009/actuator/health
 http://localhost:40010/actuator/health
 ```
+

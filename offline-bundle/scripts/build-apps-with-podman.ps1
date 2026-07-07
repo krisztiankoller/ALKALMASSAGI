@@ -6,6 +6,7 @@ param(
     [string]$MavenRepoDir = "",
     [string]$BuildLogDir = "",
     [string]$ProxyConfigFile = "",
+    [string]$MavenSettingsFile = "",
     [string]$HttpProxy = "",
     [string]$HttpsProxy = "",
     [string]$NoProxy = "localhost,127.0.0.1,mssql,kafka,kafka-ui,sql-admin,app1,app2,app3,app4,app5,app6",
@@ -31,6 +32,7 @@ $script:HttpsProxy = $HttpsProxy
 $script:NoProxy = $NoProxy
 $script:ProxyUsername = $ProxyUsername
 $script:ProxyPassword = $ProxyPassword
+$script:MavenSettingsFile = $MavenSettingsFile
 $script:ConfiguredPodmanTlsVerify = $PodmanTlsVerify
 $script:ConfiguredMavenTlsVerify = $MavenTlsVerify
 function Show-Help {
@@ -72,6 +74,12 @@ Fontos parameterek:
       Build log konyvtar. Uresen: .\data\build-logs
   -ProxyConfigFile
       Proxy config JSON. Uresen: .\proxy.config.json
+  -MavenSettingsFile
+      Kulon Maven settings.xml fajl, amelyet csak ez az app build hasznal.
+      Ha meg van adva, a Maven kontener read-only mounttal kapja meg, es a
+      script `mvn -s /maven-settings/<fajlnev> clean package` parancsot futtat.
+      Relativ ut eseten a projekt gyokerehez kepest ertendo.
+      A script ezt a fajlt nem modositja es nem masolja a Maven cache-be.
   -HttpProxy, -HttpsProxy, -NoProxy, -ProxyUsername, -ProxyPassword
       Ideiglenes parancssori proxy feluliras. Normal esetben a proxy.config.json hasznalando.
   -PodmanTlsVerify
@@ -253,6 +261,11 @@ function Apply-ProxyConfigFile {
     if (-not $script:InvocationBoundParameters.ContainsKey("MavenTlsVerify") -and
         $config.PSObject.Properties.Name -contains "mavenTlsVerify") {
         $script:ConfiguredMavenTlsVerify = $config.mavenTlsVerify
+    }
+    if (-not $script:InvocationBoundParameters.ContainsKey("MavenSettingsFile") -and
+        $config.PSObject.Properties.Name -contains "mavenSettingsFile" -and
+        -not [string]::IsNullOrWhiteSpace([string]$config.mavenSettingsFile)) {
+        $script:MavenSettingsFile = [string]$config.mavenSettingsFile
     }
     if ($null -eq $config -or $config.enabled -ne $true) {
         return
@@ -463,6 +476,19 @@ $httpsXml
     $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
     [System.IO.File]::WriteAllText($settingsPath, $settingsXml, $utf8NoBom)
 }
+function Resolve-ProjectPathOrEmpty {
+    param(
+        [string]$Path,
+        [string]$Root
+    )
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return ""
+    }
+    if ([System.IO.Path]::IsPathRooted($Path)) {
+        return $Path
+    }
+    return Join-Path $Root $Path
+}
 $projectRoot = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($ProxyConfigFile)) {
     $ProxyConfigFile = Join-Path $projectRoot "proxy.config.json"
@@ -508,10 +534,31 @@ $effectiveHttpProxy = Resolve-ProxyUrl -Url $script:HttpProxy -Username $script:
 $effectiveHttpsProxy = Resolve-ProxyUrl -Url $(if ([string]::IsNullOrWhiteSpace($script:HttpsProxy)) { $script:HttpProxy } else { $script:HttpsProxy }) -Username $script:ProxyUsername -Password $script:ProxyPassword
 $effectiveNoProxy = $script:NoProxy
 Set-ProxyEnvironment -HttpProxy $effectiveHttpProxy -HttpsProxy $effectiveHttpsProxy -NoProxy $effectiveNoProxy
-Write-MavenSettingsWithProxy -MavenRepo $mavenRepo -HttpProxy $effectiveHttpProxy -HttpsProxy $effectiveHttpsProxy -NoProxy $effectiveNoProxy
+$mavenSettingsFileResolved = Resolve-ProjectPathOrEmpty -Path $script:MavenSettingsFile -Root $projectRoot
+if ([string]::IsNullOrWhiteSpace($mavenSettingsFileResolved)) {
+    Write-MavenSettingsWithProxy -MavenRepo $mavenRepo -HttpProxy $effectiveHttpProxy -HttpsProxy $effectiveHttpsProxy -NoProxy $effectiveNoProxy
+} else {
+    if (-not (Test-Path -LiteralPath $mavenSettingsFileResolved)) {
+        throw "Maven settings file was not found: $mavenSettingsFileResolved"
+    }
+    try {
+        [xml]$null = Get-Content -LiteralPath $mavenSettingsFileResolved -Raw -Encoding UTF8
+    }
+    catch {
+        throw "Maven settings file is not valid XML: $mavenSettingsFileResolved. Error: $($_.Exception.Message)"
+    }
+    Write-Host "Using app build Maven settings file: $(Format-ProjectRelativePath -Path $mavenSettingsFileResolved -Root $projectRoot)"
+}
 $projectRootWsl = ConvertTo-WslPath $projectRoot
 $mavenRepoWsl = ConvertTo-WslPath $mavenRepo
 $buildLogDirWsl = ConvertTo-WslPath $buildLogDirResolved
+$mavenSettingsDirWsl = ""
+$mavenSettingsFileName = ""
+if (-not [string]::IsNullOrWhiteSpace($mavenSettingsFileResolved)) {
+    $mavenSettingsDir = Split-Path -Parent $mavenSettingsFileResolved
+    $mavenSettingsFileName = Split-Path -Leaf $mavenSettingsFileResolved
+    $mavenSettingsDirWsl = ConvertTo-WslPath $mavenSettingsDir
+}
 if (-not $Offline) {
     Invoke-PodmanPull -Image $MavenImage
 }
@@ -524,7 +571,14 @@ if ($LASTEXITCODE -eq 0) {
     Invoke-Podman -Arguments @("rm", "-f", $BuildContainerName)
 }
 $mavenArgs = [System.Collections.Generic.List[string]]::new()
-foreach ($arg in @("mvn", "clean", "package")) {
+foreach ($arg in @("mvn")) {
+    $mavenArgs.Add($arg)
+}
+if (-not [string]::IsNullOrWhiteSpace($mavenSettingsFileName)) {
+    $mavenArgs.Add("-s")
+    $mavenArgs.Add("/maven-settings/$mavenSettingsFileName")
+}
+foreach ($arg in @("clean", "package")) {
     $mavenArgs.Add($arg)
 }
 if ($SkipTests) {
@@ -544,6 +598,10 @@ foreach ($arg in @(
     "-w", "/workspace"
 )) {
     $runArgs.Add($arg)
+}
+if (-not [string]::IsNullOrWhiteSpace($mavenSettingsDirWsl)) {
+    $runArgs.Add("-v")
+    $runArgs.Add("${mavenSettingsDirWsl}:/maven-settings:ro")
 }
 Add-ProxyEnvArgs -ArgumentList $runArgs -HttpProxy $effectiveHttpProxy -HttpsProxy $effectiveHttpsProxy -NoProxy $effectiveNoProxy
 $runArgs.Add($MavenImage)
