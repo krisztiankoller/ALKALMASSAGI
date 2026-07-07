@@ -1,5 +1,5 @@
 ﻿{
-    "createdAt":  "2026-07-06T15:18:43",
+    "createdAt":  "2026-07-07T08:10:49",
     "networkName":  "devnet",
     "sqlImage":  "mcr.microsoft.com/mssql/server:2019-latest",
     "kafkaImage":  "apache/kafka-native:3.9.0",

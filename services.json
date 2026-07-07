@@ -1,68 +1,187 @@
-[
-    {
-        "name":  "app1",
-        "projectDir":  "app1",
-        "hostPort":  40005,
-        "containerPort":  8080,
-        "imageTag":  "local/app1:dev",
-        "env":  {
-                    "SPRING_PROFILES_ACTIVE":  "podman",
-                    "JAVA_OPTS":  "-Xms128m -Xmx512m"
-                }
+{
+  "_comment_00": "============================================================",
+  "_comment_01": "ALKALMASSAGI local/offline Podman stack configuration",
+  "_comment_02": "JSON does not support real comments, so these _comment fields are intentionally ignored by the scripts.",
+  "_comment_03": "Database resources contain the application JDBC connection data. Use managed=false for external databases.",
+  "_comment_04": "============================================================",
+  "_section_10": "==================== Kafka topics ====================",
+  "kafkaTopics": {
+    "app1Source": {
+      "name": "app1.source",
+      "partitions": 1,
+      "replicas": 1
     },
-    {
-        "name":  "app2",
-        "projectDir":  "app2",
-        "hostPort":  40006,
-        "containerPort":  8080,
-        "imageTag":  "local/app2:dev",
-        "env":  {
-                    "SPRING_PROFILES_ACTIVE":  "podman",
-                    "JAVA_OPTS":  "-Xms128m -Xmx512m"
-                }
+    "app2Source": {
+      "name": "app2.source",
+      "partitions": 1,
+      "replicas": 1
     },
-    {
-        "name":  "app3",
-        "projectDir":  "app3",
-        "hostPort":  40007,
-        "containerPort":  8080,
-        "imageTag":  "local/app3:dev",
-        "env":  {
-                    "SPRING_PROFILES_ACTIVE":  "podman",
-                    "JAVA_OPTS":  "-Xms128m -Xmx512m"
-                }
+    "app3Source": {
+      "name": "app3.source",
+      "partitions": 1,
+      "replicas": 1
     },
-    {
-        "name":  "app4",
-        "projectDir":  "app4",
-        "hostPort":  40008,
-        "containerPort":  8080,
-        "imageTag":  "local/app4:dev",
-        "env":  {
-                    "SPRING_PROFILES_ACTIVE":  "podman",
-                    "JAVA_OPTS":  "-Xms128m -Xmx512m"
-                }
+    "app4Source": {
+      "name": "app4.source",
+      "partitions": 1,
+      "replicas": 1
     },
-    {
-        "name":  "app5",
-        "projectDir":  "app5",
-        "hostPort":  40009,
-        "containerPort":  8080,
-        "imageTag":  "local/app5:dev",
-        "env":  {
-                    "SPRING_PROFILES_ACTIVE":  "podman",
-                    "JAVA_OPTS":  "-Xms128m -Xmx512m"
-                }
+    "app5Source": {
+      "name": "app5.source",
+      "partitions": 1,
+      "replicas": 1
     },
-    {
-        "name":  "app6",
-        "projectDir":  "app6",
-        "hostPort":  40010,
-        "containerPort":  8080,
-        "imageTag":  "local/app6:dev",
-        "env":  {
-                    "SPRING_PROFILES_ACTIVE":  "podman",
-                    "JAVA_OPTS":  "-Xms128m -Xmx512m"
-                }
+    "app6Source": {
+      "name": "app6.source",
+      "partitions": 1,
+      "replicas": 1
+    },
+    "app7Final": {
+      "name": "app7.final",
+      "partitions": 1,
+      "replicas": 1
     }
-]
+  },
+  "_section_20": "==================== MSSQL database resources ====================",
+  "_comment_20": "managed=true: local infra script creates/updates the DB in the Podman MSSQL container.",
+  "_comment_21": "managed=false: external DB; the app still uses connectionString/username/password, infra does not create/drop it.",
+  "_comment_22": "schemaScript is a static DB-specific SQL file. It has no tokens or placeholders.",
+  "databases": {
+    "app1Audit": {
+      "_comment": "app1 audit database connection and schema script",
+      "name": "app1_audit",
+      "schema": "dbo",
+      "managed": true,
+      "connectionString": "jdbc:sqlserver://mssql:1433;databaseName=app1_audit;encrypt=false;trustServerCertificate=true",
+      "username": "sa",
+      "password": "Alkalmassagi_2026!",
+      "schemaScript": "sql/app1-audit.sql"
+    },
+    "app2Audit": {
+      "_comment": "app2 audit database connection and schema script",
+      "name": "app2_audit",
+      "schema": "dbo",
+      "managed": true,
+      "connectionString": "jdbc:sqlserver://mssql:1433;databaseName=app2_audit;encrypt=false;trustServerCertificate=true",
+      "username": "sa",
+      "password": "Alkalmassagi_2026!",
+      "schemaScript": "sql/app2-audit.sql"
+    },
+    "app3Audit": {
+      "_comment": "app3 audit database connection and schema script",
+      "name": "app3_audit",
+      "schema": "dbo",
+      "managed": true,
+      "connectionString": "jdbc:sqlserver://mssql:1433;databaseName=app3_audit;encrypt=false;trustServerCertificate=true",
+      "username": "sa",
+      "password": "Alkalmassagi_2026!",
+      "schemaScript": "sql/app3-audit.sql"
+    },
+    "app4Audit": {
+      "_comment": "app4 audit database connection and schema script",
+      "name": "app4_audit",
+      "schema": "dbo",
+      "managed": true,
+      "connectionString": "jdbc:sqlserver://mssql:1433;databaseName=app4_audit;encrypt=false;trustServerCertificate=true",
+      "username": "sa",
+      "password": "Alkalmassagi_2026!",
+      "schemaScript": "sql/app4-audit.sql"
+    },
+    "app5Audit": {
+      "_comment": "app5 audit database connection and schema script",
+      "name": "app5_audit",
+      "schema": "dbo",
+      "managed": true,
+      "connectionString": "jdbc:sqlserver://mssql:1433;databaseName=app5_audit;encrypt=false;trustServerCertificate=true",
+      "username": "sa",
+      "password": "Alkalmassagi_2026!",
+      "schemaScript": "sql/app5-audit.sql"
+    },
+    "app6Audit": {
+      "_comment": "app6 audit database connection and schema script",
+      "name": "app6_audit",
+      "schema": "dbo",
+      "managed": true,
+      "connectionString": "jdbc:sqlserver://mssql:1433;databaseName=app6_audit;encrypt=false;trustServerCertificate=true",
+      "username": "sa",
+      "password": "Alkalmassagi_2026!",
+      "schemaScript": "sql/app6-audit.sql"
+    }
+  },
+  "_section_30": "==================== Spring Boot application pods ====================",
+  "_comment_30": "Service entries only describe pod/image/runtime metadata. Resource usage is still declared in each app application.yaml.",
+  "services": [
+    {
+      "name": "app1",
+      "projectDir": "app1",
+      "hostPort": 40005,
+      "containerPort": 8080,
+      "imageTag": "local/app1:dev",
+      "applicationYaml": "application.yaml",
+      "env": {
+        "SPRING_PROFILES_ACTIVE": "podman",
+        "JAVA_OPTS": "-Xms128m -Xmx512m"
+      }
+    },
+    {
+      "name": "app2",
+      "projectDir": "app2",
+      "hostPort": 40006,
+      "containerPort": 8080,
+      "imageTag": "local/app2:dev",
+      "applicationYaml": "application.yaml",
+      "env": {
+        "SPRING_PROFILES_ACTIVE": "podman",
+        "JAVA_OPTS": "-Xms128m -Xmx512m"
+      }
+    },
+    {
+      "name": "app3",
+      "projectDir": "app3",
+      "hostPort": 40007,
+      "containerPort": 8080,
+      "imageTag": "local/app3:dev",
+      "applicationYaml": "application.yaml",
+      "env": {
+        "SPRING_PROFILES_ACTIVE": "podman",
+        "JAVA_OPTS": "-Xms128m -Xmx512m"
+      }
+    },
+    {
+      "name": "app4",
+      "projectDir": "app4",
+      "hostPort": 40008,
+      "containerPort": 8080,
+      "imageTag": "local/app4:dev",
+      "applicationYaml": "application.yaml",
+      "env": {
+        "SPRING_PROFILES_ACTIVE": "podman",
+        "JAVA_OPTS": "-Xms128m -Xmx512m"
+      }
+    },
+    {
+      "name": "app5",
+      "projectDir": "app5",
+      "hostPort": 40009,
+      "containerPort": 8080,
+      "imageTag": "local/app5:dev",
+      "applicationYaml": "application.yaml",
+      "env": {
+        "SPRING_PROFILES_ACTIVE": "podman",
+        "JAVA_OPTS": "-Xms128m -Xmx512m"
+      }
+    },
+    {
+      "name": "app6",
+      "projectDir": "app6",
+      "hostPort": 40010,
+      "containerPort": 8080,
+      "imageTag": "local/app6:dev",
+      "applicationYaml": "application.yaml",
+      "env": {
+        "SPRING_PROFILES_ACTIVE": "podman",
+        "JAVA_OPTS": "-Xms128m -Xmx512m"
+      }
+    }
+  ]
+}

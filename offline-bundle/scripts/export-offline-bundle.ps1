@@ -76,9 +76,11 @@ Mit csinal:
      Apache NiFi, Java runtime, Maven builder.
   4. Osszegyujti az osszes image-et es elmenti ide:
      .\offline-bundle\images\podman-images.tar
-  5. Bemasolja a services.json-t es a Containerfile-t.
+  5. Bemasolja a services.json-t, services.sample.json-t, ha letezik, es a
+     Containerfile-t.
   6. Bemasolja a scripts konyvtarat, beleertve a scripts/private segedfajlokat.
   7. Bemasolja az appok src/main/resources konyvtarait runtime YAML config miatt.
+     A service szintu applicationYaml mezot is ellenorzi, ha meg van adva.
   8. Bemasolja a dokumentaciot es browser-start.html-t.
   9. Letrehozza a bundle-manifest.json fajlt.
 Parameterek:
@@ -371,6 +373,56 @@ function Find-ServiceJar {
     }
     return $jars[0].FullName
 }
+function Get-JsonPropertyValue {
+    param(
+        [object]$Object,
+        [string]$Name
+    )
+    if ($null -eq $Object) {
+        return $null
+    }
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        return $null
+    }
+    return $property.Value
+}
+function Get-ServicesConfig {
+    param([string]$Path)
+    $json = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+    $serviceList = Get-JsonPropertyValue -Object $json -Name "services"
+    if ($null -eq $serviceList) {
+        $serviceList = $json
+    }
+    return [ordered]@{
+        services = @($serviceList)
+        kafkaTopics = Get-JsonPropertyValue -Object $json -Name "kafkaTopics"
+        databases = Get-JsonPropertyValue -Object $json -Name "databases"
+    }
+}
+function Resolve-ServiceApplicationYaml {
+    param(
+        [object]$Service,
+        [string]$ProjectDir
+    )
+    $configured = [string](Get-JsonPropertyValue -Object $Service -Name "applicationYaml")
+    if ([string]::IsNullOrWhiteSpace($configured)) {
+        $configured = [string](Get-JsonPropertyValue -Object $Service -Name "applicationConfig")
+    }
+    if ([string]::IsNullOrWhiteSpace($configured)) {
+        $configured = "application.yaml"
+    }
+
+    if ([System.IO.Path]::IsPathRooted($configured)) {
+        return $configured
+    }
+
+    if ($configured -match "[\\/]" -or $configured -match "^[.][.]?[\\/]") {
+        return (Join-Path $ProjectDir $configured)
+    }
+
+    return (Join-Path $ProjectDir (Join-Path "src\main\resources" $configured))
+}
 function Build-ServiceImage {
     param(
         [object]$Service,
@@ -418,7 +470,7 @@ function Copy-ServiceRuntimeConfig {
         $projectDir = Join-Path $ProjectRoot $projectDir
     }
     $resourcesDir = Join-Path $projectDir "src\main\resources"
-    $applicationYaml = Join-Path $resourcesDir "application.yaml"
+    $applicationYaml = Resolve-ServiceApplicationYaml -Service $Service -ProjectDir $projectDir
     if (-not (Test-Path -LiteralPath $applicationYaml)) {
         throw "Missing runtime application YAML for service '$name': $applicationYaml"
     }
@@ -531,7 +583,8 @@ if (-not $SkipJavaBuild) {
         throw "Java build failed with exit code $LASTEXITCODE"
     }
 }
-$services = Get-Content -LiteralPath $ServicesFile -Raw -Encoding UTF8 | ConvertFrom-Json
+$servicesConfig = Get-ServicesConfig -Path $ServicesFile
+$services = $servicesConfig.services
 $images = [System.Collections.Generic.List[string]]::new()
 $images.Add($SqlImage)
 $images.Add($KafkaImage)
@@ -572,6 +625,10 @@ $saveArgs = @(
 ) + @($uniqueImages)
 Invoke-Podman -Arguments $saveArgs
 Copy-Item -LiteralPath $ServicesFile -Destination (Join-Path $BundleDir "services.json") -Force
+$servicesSampleFile = Join-Path $ProjectRoot "services.sample.json"
+if (Test-Path -LiteralPath $servicesSampleFile) {
+    Copy-Item -LiteralPath $servicesSampleFile -Destination (Join-Path $BundleDir "services.sample.json") -Force
+}
 Copy-Item -LiteralPath $Containerfile -Destination (Join-Path $BundleDir "Containerfile.spring-boot-jar") -Force
 $nifiConfigPath = Join-Path $ProjectRoot "nifi-flows.yaml"
 if (Test-Path -LiteralPath $nifiConfigPath) {
@@ -585,6 +642,10 @@ if (Test-Path -LiteralPath $nifiTemplateConfigPath) {
 $nifiSamplesPath = Join-Path $ProjectRoot "nifi-sample-files"
 if (Test-Path -LiteralPath $nifiSamplesPath) {
     Copy-Item -LiteralPath $nifiSamplesPath -Destination (Join-Path $BundleDir "nifi-sample-files") -Recurse -Force
+}
+$sqlScriptsPath = Join-Path $ProjectRoot "sql"
+if (Test-Path -LiteralPath $sqlScriptsPath) {
+    Copy-Item -LiteralPath $sqlScriptsPath -Destination (Join-Path $BundleDir "sql") -Recurse -Force
 }
 $bundleScriptsDir = Join-Path $BundleDir "scripts"
 $bundlePrivateScriptsDir = Join-Path $bundleScriptsDir "private"
@@ -626,6 +687,7 @@ foreach ($docName in @(
     "NIFI-FILE-TO-KAFKA.md",
     "REST-SOAP-SECURITY-EXAMPLES.md",
     "ADD-NEW-APP.md",
+    "TESTING-CHECKLIST.md",
     "start.md",
     "browser-start.html"
 )) {

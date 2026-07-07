@@ -211,6 +211,17 @@ DB admin UI -> app1_audit ... app6_audit -> audit_events tabla
 Dozzle -> app1 ... app6, kafka, mssql, nifi logok
 ```
 
+Teljes, parancsrol parancsra futtathato ellenorzesi lista:
+
+```text
+TESTING-CHECKLIST.md
+```
+
+Ez tartalmazza a kiprobalt koroket: script syntax es `--help`, teljes Maven
+build Podman alatt, infra deploy, app image build, app health, web UI-k, Kafka
+topic lista, direkt Kafka uzenet, NiFi file-to-Kafka uzenet, MSSQL audit sorok,
+log export, offline bundle export es offline bundle inditas.
+
 ### 7. Offline bundle ujrageneralasa
 
 Ha azt akarod, hogy a mostani allapot masik gepre is atviheto legyen internet
@@ -311,7 +322,104 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-offline.ps1 `
 
 - a kesz JAR-okbol Podman image-et epit: `local/app1:dev` - `local/app6:dev`;
 - elinditja az app podokat;
-- a `services.json` alapjan oszt portot, app nevet es kornyezeti beallitast.
+- a `services.json` alapjan oszt portot es app pod metadata-t;
+- az app `application.yaml` `pipeline.resource-refs` resze alapjan oldja fel,
+  hogy az app melyik audit DB-t hasznalja. A Kafka topic nevek es consumer
+  group ID-k kozvetlenul az app YAML-okban vannak.
+
+## services.json szerepe
+
+A `services.json` a runtime kozponti terkepe. Itt vannak:
+
+- `kafkaTopics`: az osszes Kafka topic neve es letrehozasi parametere.
+- `databases`: az app audit adatbazisok neve, schema-ja, kapcsolati adatai es schema scriptje.
+- `services`: az app podok listaja, portokkal, image nevekkel, runtime YAML
+  fajlnevekkel es env beallitasokkal.
+
+Pelda:
+
+```json
+{
+  "kafkaTopics": {
+    "app1Source": {
+      "name": "app1.source",
+      "partitions": 1,
+      "replicas": 1
+    }
+  },
+  "databases": {
+    "app1Audit": {
+      "name": "app1_audit",
+      "schema": "dbo",
+      "managed": true,
+      "connectionString": "jdbc:sqlserver://mssql:1433;databaseName=app1_audit;encrypt=false;trustServerCertificate=true",
+      "username": "sa",
+      "password": "Alkalmassagi_2026!",
+      "schemaScript": "sql/app1-audit.sql"
+    }
+  },
+  "services": [
+    {
+      "name": "app1",
+      "projectDir": "app1",
+      "hostPort": 40005,
+      "containerPort": 8080,
+      "imageTag": "local/app1:dev",
+      "applicationYaml": "application.yaml"
+    }
+  ]
+}
+```
+
+Az `applicationYaml` opcionalis. Ha nincs megadva, `application.yaml` az
+alapertelmezes. Mas fajlnevhez pelda:
+
+```json
+"applicationYaml": "application-local.yaml"
+```
+
+Ilyenkor a script az `app1\src\main\resources\application-local.yaml` fajlt
+mountolja a kontenerbe `/app/config/application.yaml` neven.
+
+Az appok `application.yaml` fajljai mondjak meg, hogy melyik DB resource kulcsot
+hasznaljak, es ugyanitt latszik kozvetlenul a Kafka routing:
+
+```yaml
+spring:
+  kafka:
+    consumer:
+      group-id: app1-group
+
+pipeline:
+  resource-refs:
+    database: app1Audit
+  source-topic: app1.source
+  destination-topic: app2.source
+```
+
+A konkret DB nev es kapcsolati adatok a `services.json` resource katalogusaban
+vannak. A Kafka topic katalogus is ott van, mert az infra script abbol hozza
+letre es tartja karban a topicokat, de az app routingja az `application.yaml`
+kozvetlen topic neveit hasznalja.
+
+Az infra script a `services.json` resource katalogusait kezelt allapotnak
+tekinti: letrehozza a hianyzo DB-ket/topicokat, es torli azt, amit korabban o
+kezelt, de mar nincs a JSON-ben. A state fajl:
+
+```text
+data\managed-resources.json
+```
+
+Az MSSQL DB objektumokat nem az appok hozzak letre. Minden DB bejegyzes
+`schemaScript` mezovel hivatkozik egy sajat, statikus SQL fajlra. Ez a fajl
+minden infra inditaskor lefut az adott DB-ben, ezert idempotensnek kell lennie.
+Az SQL fajlokban nincs token vagy helyettesito valtozo; minden DB-hez kulon
+script tartozik, peldaul `sql/app1-audit.sql`.
+
+Az `auditTable` nincs a `services.json` adatbazis bejegyzeseiben. A tabla neve
+alapbol `audit_events`, ezt az app runtime konfiguracioja kezeli. Kulso
+adatbazishoz allitsd a DB resource-ban `managed: false` ertekre, es add meg a
+kulso `connectionString`, `username`, `password` ertekeket.
 
 `scripts\export-offline-bundle.ps1`:
 
@@ -924,7 +1032,9 @@ volume-ot erinti. A Kafka/NiFi/log/adat konyvtarak nem torlodnek emiatt.
 
 Ha `run-offline.ps1`-t futtatsz, az app podok ujrainditasa automatikusan jon az
 infra utan. Ha csak `deploy-infra-pods.ps1`-t futtattal kezzel, utana inditsd
-ujra az app podokat is, hogy ujra letrehozzak az audit adatbazisokat:
+ujra az app podokat is, hogy friss Kafka/MSSQL kapcsolatokkal induljanak. Az
+audit adatbazisokat es objektumokat az infra script hozza letre a
+`services.json` `databases[*].schemaScript` bejegyzesei alapjan:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-springboot-pods.ps1 `
@@ -1092,7 +1202,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\export-offline-bun
 - Ne irj be fix, gephez vagy felhasznalohoz kotott abszolut Windows utvonalakat a konfiguracioba.
 - A projekt sajat fajljaira relativan hivatkozz.
 - A scriptek a `scripts` konyvtar szulojat tekintik projektgyokernek.
-- Az `application.yaml` fajlok az appok alatt vannak: `app1\src\main\resources\application.yaml` stb.
+- A runtime YAML fajlok az appok alatt vannak: alapbol
+  `app1\src\main\resources\application.yaml` stb. Mas fajlnev eseten a
+  `services.json` adott service bejegyzesenek `applicationYaml` mezoje mondja
+  meg, melyiket kell mountolni.
 - A JKS fajlok helye apponkent: `appN\src\main\resources\security`.
 - A masik gepen csak az `offline-bundle` mappabol inditsd a `scripts\run-offline.ps1` scriptet.
 
@@ -1140,6 +1253,12 @@ Reszletes script help barmelyik scripthez:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-offline.ps1 --help
+```
+
+Teljes kiprobalasi checklista:
+
+```powershell
+notepad .\TESTING-CHECKLIST.md
 ```
 
 Bongeszoben:

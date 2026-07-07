@@ -3,6 +3,7 @@ param(
 
     [string]$NetworkName = "devnet",
     [string]$KafkaImage = "apache/kafka-native:3.9.0",
+    [string]$KafkaCliImage = "apache/kafka:3.9.0",
     [string]$KafkaUiImage = "ghcr.io/kafbat/kafka-ui:latest",
     [string]$SqlImage = "mcr.microsoft.com/mssql/server:2019-latest",
     [string]$SqlAdminImage = "dbgate/dbgate:latest",
@@ -52,16 +53,21 @@ Mit csinal:
   3. Letrehozza az SQL Server volume-ot es javitja a volume jogosultsagait.
      Ez fontos, mert az SQL Server kontener nem rootkent fut.
   4. Letrehozza a projekt alatti data konyvtarakat.
-  5. DbGate kapcsolatokat general a services.json alapjan.
-  6. Ujra letrehozza az infra podokat, ha mar leteznek.
-  7. Elinditja:
+  5. Beolvassa a services.json kafkaTopics es databases katalogusait.
+  6. Letrehozza a hianyzo kezelt MSSQL adatbazisokat/audit tablakat.
+  7. Letrehozza a hianyzo kezelt Kafka topicokat.
+  8. Torli azokat a korabban kezelt DB/topic resource-okat, amelyek mar
+     nincsenek a services.json fajlban.
+  9. DbGate kapcsolatokat general a services.json databases katalogusa alapjan.
+  10. Ujra letrehozza az infra podokat, ha mar leteznek.
+  11. Elinditja:
      - mssql-pod / mssql
      - kafka-pod / kafka
      - kafka-ui-pod / kafka-ui
      - sql-admin-pod / sql-admin
      - log-viewer-pod / log-viewer
      - nifi-pod / nifi
-  8. Opcionalisan nifi-flows.yaml alapjan letrehozza a NiFi file-to-Kafka flow-t.
+  12. Opcionalisan nifi-flows.yaml alapjan letrehozza a NiFi file-to-Kafka flow-t.
 
 Fontos:
   Ez a script a podokat ujra letrehozhatja. Az SQL adat volume megmarad,
@@ -75,12 +81,15 @@ Parameterek:
   -NetworkName
       Podman network neve. Alapertelmezett: devnet
 
-  -KafkaImage, -KafkaUiImage, -SqlImage, -SqlAdminImage, -LogViewerImage, -NifiImage
-      Hasznalt kontener image-ek.
+  -KafkaImage, -KafkaCliImage, -KafkaUiImage, -SqlImage, -SqlAdminImage, -LogViewerImage, -NifiImage
+      Hasznalt kontener image-ek. A Kafka broker alapbol apache/kafka-native,
+      a topic admin parancsokhoz kulon apache/kafka CLI helper image fut.
 
   -ServicesFile
       services.json utvonala. Uresen: .\services.json
-      Ez alapjan kerulnek be az app adatbazis kapcsolatok a DbGate UI-ba.
+      Ez alapjan jonnek letre a kezelt Kafka topicok, MSSQL audit DB-k,
+      audit tablak es DbGate kapcsolatok. A torleshez a script ezt a state
+      fajlt hasznalja: .\data\managed-resources.json
 
   -NifiConfigFile
       NiFi file-to-Kafka YAML config. Uresen: .\nifi-flows.yaml
@@ -153,6 +162,7 @@ if ([string]::IsNullOrWhiteSpace($SqlPassword)) {
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $DataRoot = Join-Path $ProjectRoot "data"
+$ResourceStateFile = Join-Path $DataRoot "managed-resources.json"
 $MssqlBackupData = Join-Path $DataRoot "mssql-backups"
 $KafkaData = Join-Path $DataRoot "kafka"
 $CloudBeaverData = Join-Path $DataRoot "cloudbeaver"
@@ -496,7 +506,22 @@ function Ensure-CloudBeaverConfiguration {
         -Content ($permissions | ConvertTo-Json -Depth 10)
 }
 
-function Get-ServiceNames {
+function Get-JsonPropertyValue {
+    param(
+        [object]$Object,
+        [string]$Name
+    )
+    if ($null -eq $Object) {
+        return $null
+    }
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        return $null
+    }
+    return $property.Value
+}
+
+function Get-ServicesConfig {
     param([string]$Path)
 
     if ([string]::IsNullOrWhiteSpace($Path)) {
@@ -506,11 +531,376 @@ function Get-ServiceNames {
     }
 
     if (-not (Test-Path -LiteralPath $Path)) {
-        return @("app1", "app2", "app3", "app4", "app5", "app6")
+        $defaultServices = @("app1", "app2", "app3", "app4", "app5", "app6") | ForEach-Object {
+            [pscustomobject]@{
+                name = $_
+            }
+        }
+        return [ordered]@{
+            services = @($defaultServices)
+            kafkaTopics = $null
+            databases = $null
+        }
     }
 
-    $services = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
-    return @($services | ForEach-Object { [string]$_.name } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $json = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+    $serviceList = Get-JsonPropertyValue -Object $json -Name "services"
+    if ($null -eq $serviceList) {
+        $serviceList = $json
+    }
+    return [ordered]@{
+        services = @($serviceList)
+        kafkaTopics = Get-JsonPropertyValue -Object $json -Name "kafkaTopics"
+        databases = Get-JsonPropertyValue -Object $json -Name "databases"
+    }
+}
+
+function Get-ConfigMapEntry {
+    param(
+        [object]$Map,
+        [string]$Key,
+        [string]$MapName
+    )
+    if ([string]::IsNullOrWhiteSpace($Key)) {
+        return $null
+    }
+    $entry = Get-JsonPropertyValue -Object $Map -Name $Key
+    if ($null -eq $entry) {
+        throw "Unknown $MapName reference '$Key' in services.json."
+    }
+    return $entry
+}
+
+function Get-JsonBooleanValue {
+    param(
+        [object]$Object,
+        [string]$Name,
+        [bool]$DefaultValue
+    )
+
+    $value = Get-JsonPropertyValue -Object $Object -Name $Name
+    if ($null -eq $value) {
+        return $DefaultValue
+    }
+    if ($value -is [bool]) {
+        return [bool]$value
+    }
+    return [System.Convert]::ToBoolean([string]$value)
+}
+
+function Assert-ResourceIdentifier {
+    param(
+        [string]$Value,
+        [string]$Purpose
+    )
+    if ([string]::IsNullOrWhiteSpace($Value) -or $Value -notmatch "^[A-Za-z0-9_.-]+$") {
+        throw "Invalid $Purpose '$Value'. Use only letters, numbers, underscore, dot or dash."
+    }
+    return $Value
+}
+
+function Assert-SqlResourceIdentifier {
+    param(
+        [string]$Value,
+        [string]$Purpose
+    )
+    if ([string]::IsNullOrWhiteSpace($Value) -or $Value -notmatch "^[A-Za-z0-9_]+$") {
+        throw "Invalid $Purpose '$Value'. Use only letters, numbers or underscore. This must match the Spring app SQL identifier validation."
+    }
+    return $Value
+}
+
+function Get-ResourceCatalog {
+    param([string]$Path)
+
+    $config = Get-ServicesConfig -Path $Path
+    $databases = [System.Collections.Generic.List[object]]::new()
+    $topics = [System.Collections.Generic.List[object]]::new()
+
+    if ($null -ne $config.databases) {
+        foreach ($property in $config.databases.PSObject.Properties) {
+            $database = $property.Value
+            $databaseName = Assert-SqlResourceIdentifier -Value ([string](Get-JsonPropertyValue -Object $database -Name "name")) -Purpose "database name"
+            $schemaName = [string](Get-JsonPropertyValue -Object $database -Name "schema")
+            $managed = Get-JsonBooleanValue -Object $database -Name "managed" -DefaultValue $true
+            $connectionString = [string](Get-JsonPropertyValue -Object $database -Name "connectionString")
+            $username = [string](Get-JsonPropertyValue -Object $database -Name "username")
+            $password = [string](Get-JsonPropertyValue -Object $database -Name "password")
+            if ([string]::IsNullOrWhiteSpace($schemaName)) {
+                $schemaName = "dbo"
+            }
+            $schemaScript = [string](Get-JsonPropertyValue -Object $database -Name "schemaScript")
+            if ($managed -and [string]::IsNullOrWhiteSpace($schemaScript)) {
+                throw "Database resource '$($property.Name)' must have a schemaScript field in services.json."
+            }
+            Assert-SqlResourceIdentifier -Value $schemaName -Purpose "schema name" | Out-Null
+            $databases.Add([pscustomobject]@{
+                key = [string]$property.Name
+                name = $databaseName
+                schema = $schemaName
+                managed = $managed
+                connectionString = $connectionString
+                username = $username
+                password = $password
+                schemaScript = $schemaScript
+            })
+        }
+    }
+
+    if ($null -ne $config.kafkaTopics) {
+        foreach ($property in $config.kafkaTopics.PSObject.Properties) {
+            $topic = $property.Value
+            $topicName = Assert-ResourceIdentifier -Value ([string](Get-JsonPropertyValue -Object $topic -Name "name")) -Purpose "Kafka topic name"
+            $partitions = Get-JsonPropertyValue -Object $topic -Name "partitions"
+            $replicas = Get-JsonPropertyValue -Object $topic -Name "replicas"
+            $topics.Add([pscustomobject]@{
+                key = [string]$property.Name
+                name = $topicName
+                partitions = if ($null -ne $partitions) { [int]$partitions } else { 1 }
+                replicas = if ($null -ne $replicas) { [int]$replicas } else { 1 }
+            })
+        }
+    }
+
+    return [ordered]@{
+        databases = @($databases)
+        kafkaTopics = @($topics)
+    }
+}
+
+function Get-DatabaseConnections {
+    param([object[]]$Databases)
+
+    $connections = [System.Collections.Generic.List[object]]::new()
+    foreach ($database in $Databases) {
+        $connectionString = [string]$database.connectionString
+        $server = "mssql"
+        $port = "1433"
+        $databaseName = [string]$database.name
+        if ($connectionString -match "^jdbc:sqlserver://([^;:/]+)(?::([0-9]+))?") {
+            $server = $Matches[1]
+            if (-not [string]::IsNullOrWhiteSpace($Matches[2])) {
+                $port = $Matches[2]
+            }
+        }
+        if ($connectionString -match "(?i)(?:;|^)databaseName=([^;]+)") {
+            $databaseName = $Matches[1]
+        }
+        $username = [string]$database.username
+        if ([string]::IsNullOrWhiteSpace($username)) {
+            $username = "sa"
+        }
+        $connections.Add([pscustomobject]@{
+            key = [string]$database.key
+            label = [string]$database.name
+            server = $server
+            port = $port
+            database = $databaseName
+            username = $username
+            password = [string]$database.password
+        })
+    }
+    return @($connections)
+}
+
+function Read-ManagedResourceState {
+    param([string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return [ordered]@{
+            databases = @()
+            kafkaTopics = @()
+        }
+    }
+    $state = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+    return [ordered]@{
+        databases = @($state.databases | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+        kafkaTopics = @($state.kafkaTopics | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    }
+}
+
+function Write-ManagedResourceState {
+    param(
+        [string]$Path,
+        [object[]]$Databases,
+        [object[]]$KafkaTopics
+    )
+
+    $state = [ordered]@{
+        databases = @($Databases | Where-Object { $_.managed } | ForEach-Object { [string]$_.name } | Sort-Object -Unique)
+        kafkaTopics = @($KafkaTopics | ForEach-Object { [string]$_.name } | Sort-Object -Unique)
+    }
+    Write-Utf8File -Path $Path -Content ($state | ConvertTo-Json -Depth 10)
+}
+
+function Invoke-KafkaTopicsCommand {
+    param([string[]]$KafkaArgs)
+
+    $output = @(& podman run --rm --network $NetworkName $KafkaCliImage /opt/kafka/bin/kafka-topics.sh @KafkaArgs 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Kafka topics command failed: kafka-topics.sh $($KafkaArgs -join ' '). Output: $($output -join ' ')"
+    }
+    return $output
+}
+
+function Wait-KafkaReady {
+    param([int]$TimeoutSeconds = 120)
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $output = @(& podman run --rm --network $NetworkName $KafkaCliImage /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list 2>&1)
+        if ($LASTEXITCODE -eq 0) {
+            return
+        }
+        Start-Sleep -Seconds 2
+    } while ((Get-Date) -lt $deadline)
+
+    throw "Kafka did not become ready within $TimeoutSeconds seconds. Last output: $($output -join ' ')"
+}
+
+function Sync-KafkaTopicResources {
+    param(
+        [object[]]$Topics,
+        [string[]]$PreviouslyManagedTopics
+    )
+
+    $currentTopicNames = @($Topics | ForEach-Object { [string]$_.name })
+    foreach ($oldTopic in $PreviouslyManagedTopics) {
+        if ($currentTopicNames -notcontains $oldTopic) {
+            Write-Output "Deleting managed Kafka topic not present in services.json anymore: $oldTopic"
+            Invoke-KafkaTopicsCommand -KafkaArgs @("--bootstrap-server", "kafka:9092", "--delete", "--if-exists", "--topic", $oldTopic) | Out-Null
+        }
+    }
+
+    foreach ($topic in $Topics) {
+        Write-Output "Ensuring Kafka topic: $($topic.name)"
+        Invoke-KafkaTopicsCommand -KafkaArgs @(
+            "--bootstrap-server", "kafka:9092",
+            "--create",
+            "--if-not-exists",
+            "--topic", [string]$topic.name,
+            "--partitions", [string]$topic.partitions,
+            "--replication-factor", [string]$topic.replicas
+        ) | Out-Null
+    }
+}
+
+function ConvertTo-SqlLiteral {
+    param([string]$Value)
+    return "N'$($Value.Replace("'", "''"))'"
+}
+
+function ConvertTo-SqlIdentifier {
+    param([string]$Value)
+    Assert-SqlResourceIdentifier -Value $Value -Purpose "SQL identifier" | Out-Null
+    return "[$($Value.Replace("]", "]]"))]"
+}
+
+function Resolve-ProjectFilePath {
+    param(
+        [string]$Path,
+        [string]$Purpose
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        throw "Missing $Purpose path."
+    }
+    $resolvedPath = $Path
+    if (-not [System.IO.Path]::IsPathRooted($resolvedPath)) {
+        $resolvedPath = Join-Path $ProjectRoot $resolvedPath
+    }
+    if (-not (Test-Path -LiteralPath $resolvedPath -PathType Leaf)) {
+        throw "$Purpose file does not exist: $resolvedPath"
+    }
+    return (Resolve-Path -LiteralPath $resolvedPath).Path
+}
+
+function Get-DatabaseSchemaScriptSql {
+    param([object]$Database)
+
+    $scriptPath = Resolve-ProjectFilePath -Path ([string]$Database.schemaScript) -Purpose "Database schemaScript"
+    return Get-Content -LiteralPath $scriptPath -Raw -Encoding UTF8
+}
+
+function Invoke-MssqlSql {
+    param(
+        [string]$Sql,
+        [string]$SqlPassword
+    )
+
+    $encodedSql = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($Sql))
+    $command = "set -e; if [ -x /opt/mssql-tools18/bin/sqlcmd ]; then sqlcmd=/opt/mssql-tools18/bin/sqlcmd; elif [ -x /opt/mssql-tools/bin/sqlcmd ]; then sqlcmd=/opt/mssql-tools/bin/sqlcmd; elif command -v sqlcmd >/dev/null 2>&1; then sqlcmd=`$(command -v sqlcmd); else echo 'sqlcmd was not found in the mssql container.'; exit 45; fi; printf '%s' '$encodedSql' | base64 -d > /tmp/alkalmassagi-resource.sql; `"`$sqlcmd`" -S localhost -U sa -P `"`$SQLCMDPASSWORD`" -C -b -i /tmp/alkalmassagi-resource.sql"
+    $output = @(& podman exec -e "SQLCMDPASSWORD=$SqlPassword" mssql bash -lc $command 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw "SQL resource command failed. Output: $($output -join ' ')"
+    }
+    return $output
+}
+
+function Wait-MssqlReady {
+    param(
+        [string]$SqlPassword,
+        [int]$TimeoutSeconds = 120
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        try {
+            Invoke-MssqlSql -Sql "SELECT 1;" -SqlPassword $SqlPassword | Out-Null
+            return
+        }
+        catch {
+            $lastError = $_.Exception.Message
+            Start-Sleep -Seconds 2
+        }
+    } while ((Get-Date) -lt $deadline)
+
+    throw "MSSQL did not become ready within $TimeoutSeconds seconds. Last error: $lastError"
+}
+
+function Sync-MssqlDatabaseResources {
+    param(
+        [object[]]$Databases,
+        [string[]]$PreviouslyManagedDatabases,
+        [string]$SqlPassword
+    )
+
+    $managedDatabases = @($Databases | Where-Object { $_.managed })
+    $currentDatabaseNames = @($Databases | ForEach-Object { [string]$_.name })
+    foreach ($oldDatabase in $PreviouslyManagedDatabases) {
+        if ($currentDatabaseNames -notcontains $oldDatabase) {
+            Write-Output "Dropping managed MSSQL database not present in services.json anymore: $oldDatabase"
+            $dropSql = @"
+IF DB_ID($(ConvertTo-SqlLiteral $oldDatabase)) IS NOT NULL
+BEGIN
+    ALTER DATABASE $(ConvertTo-SqlIdentifier $oldDatabase) SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+    DROP DATABASE $(ConvertTo-SqlIdentifier $oldDatabase);
+END
+"@
+            Invoke-MssqlSql -Sql $dropSql -SqlPassword $SqlPassword | Out-Null
+        }
+    }
+
+    foreach ($database in $managedDatabases) {
+        Write-Output "Ensuring MSSQL database: $($database.name)"
+        $databaseName = [string]$database.name
+        $createDatabaseSql = @"
+IF DB_ID($(ConvertTo-SqlLiteral $databaseName)) IS NULL
+BEGIN
+    CREATE DATABASE $(ConvertTo-SqlIdentifier $databaseName);
+END
+"@
+        Invoke-MssqlSql -Sql $createDatabaseSql -SqlPassword $SqlPassword | Out-Null
+
+        if (-not [string]::IsNullOrWhiteSpace([string]$database.schemaScript)) {
+            Write-Output "Running MSSQL schema script for $($database.name): $($database.schemaScript)"
+            $schemaSql = @"
+USE $(ConvertTo-SqlIdentifier $databaseName);
+$(Get-DatabaseSchemaScriptSql -Database $database)
+"@
+            Invoke-MssqlSql -Sql $schemaSql -SqlPassword $SqlPassword | Out-Null
+        }
+    }
 }
 
 function Add-DbGateConnectionEnv {
@@ -518,16 +908,19 @@ function Add-DbGateConnectionEnv {
         [System.Collections.Generic.List[string]]$PodmanArgs,
         [string]$Key,
         [string]$Label,
+        [string]$Server,
+        [string]$Port,
         [string]$Database,
-        [string]$SqlPassword
+        [string]$Username,
+        [string]$Password
     )
 
     foreach ($item in @(
         @("LABEL_$Key", $Label),
-        @("SERVER_$Key", "mssql"),
-        @("USER_$Key", "sa"),
-        @("PASSWORD_$Key", $SqlPassword),
-        @("PORT_$Key", "1433"),
+        @("SERVER_$Key", $Server),
+        @("USER_$Key", $Username),
+        @("PASSWORD_$Key", $Password),
+        @("PORT_$Key", $Port),
         @("DATABASE_$Key", $Database),
         @("ENGINE_$Key", "mssql@dbgate-plugin-mssql"),
         @("AUTH_TYPE_$Key", "tedious"),
@@ -680,7 +1073,9 @@ if ([string]::IsNullOrWhiteSpace($ExternalHostName)) {
     $ExternalHostName = Get-PrimaryIPv4Address
 }
 
-$ServiceNames = Get-ServiceNames -Path $ServicesFile
+$ResourceCatalog = Get-ResourceCatalog -Path $ServicesFile
+$ManagedResourceState = Read-ManagedResourceState -Path $ResourceStateFile
+$ServiceDatabaseConnections = Get-DatabaseConnections -Databases $ResourceCatalog.databases
 
 $MssqlBackupDataWsl = ConvertTo-WslPath $MssqlBackupData
 $KafkaDataWsl = ConvertTo-WslPath $KafkaData
@@ -723,6 +1118,12 @@ if (Test-MssqlVersionMismatch -ContainerName "mssql" -TimeoutSeconds $MssqlVersi
         -MssqlBackupDataWsl $MssqlBackupDataWsl
 }
 
+Wait-MssqlReady -SqlPassword $SqlPassword
+Sync-MssqlDatabaseResources `
+    -Databases $ResourceCatalog.databases `
+    -PreviouslyManagedDatabases $ManagedResourceState.databases `
+    -SqlPassword $SqlPassword
+
 Recreate-Pod "kafka-pod" @(
     "--network", $NetworkName,
     "--network-alias", "kafka",
@@ -748,6 +1149,16 @@ podman run -d `
     -v "${KafkaDataWsl}:/var/lib/kafka/data" `
     $KafkaImage
 
+Wait-KafkaReady
+Sync-KafkaTopicResources `
+    -Topics $ResourceCatalog.kafkaTopics `
+    -PreviouslyManagedTopics $ManagedResourceState.kafkaTopics
+
+Write-ManagedResourceState `
+    -Path $ResourceStateFile `
+    -Databases $ResourceCatalog.databases `
+    -KafkaTopics $ResourceCatalog.kafkaTopics
+
 Recreate-Pod "kafka-ui-pod" @(
     "--network", $NetworkName,
     "--network-alias", "kafka-ui",
@@ -769,6 +1180,8 @@ Recreate-Pod "sql-admin-pod" @(
 )
 
 $sqlAdminArgs = [System.Collections.Generic.List[string]]::new()
+$serviceConnectionKeys = @($ServiceDatabaseConnections | ForEach-Object { $_.key })
+$connectionsEnvValue = if ($serviceConnectionKeys.Count -gt 0) { "mssql,$($serviceConnectionKeys -join ',')" } else { "mssql" }
 foreach ($arg in @(
     "run", "-d",
     "--pod", "sql-admin-pod",
@@ -776,14 +1189,18 @@ foreach ($arg in @(
     "-e", "SKIP_ALL_AUTH=1",
     "-e", "NODE_TLS_REJECT_UNAUTHORIZED=0",
     "-e", "NODE_TL_REJECT_UNAUTHORIZED=0",
-    "-e", "CONNECTIONS=mssql,$($ServiceNames -join ',')"
+    "-e", "CONNECTIONS=$connectionsEnvValue"
 )) {
     $sqlAdminArgs.Add($arg)
 }
 
-Add-DbGateConnectionEnv -PodmanArgs $sqlAdminArgs -Key "mssql" -Label "Local MSSQL" -Database "master" -SqlPassword $SqlPassword
-foreach ($serviceName in $ServiceNames) {
-    Add-DbGateConnectionEnv -PodmanArgs $sqlAdminArgs -Key $serviceName -Label "${serviceName}_audit" -Database "${serviceName}_audit" -SqlPassword $SqlPassword
+Add-DbGateConnectionEnv -PodmanArgs $sqlAdminArgs -Key "mssql" -Label "Local MSSQL" -Server "mssql" -Port "1433" -Database "master" -Username "sa" -Password $SqlPassword
+foreach ($connection in $ServiceDatabaseConnections) {
+    $connectionPassword = [string]$connection.password
+    if ([string]::IsNullOrWhiteSpace($connectionPassword)) {
+        $connectionPassword = $SqlPassword
+    }
+    Add-DbGateConnectionEnv -PodmanArgs $sqlAdminArgs -Key $connection.key -Label $connection.label -Server $connection.server -Port $connection.port -Database $connection.database -Username $connection.username -Password $connectionPassword
 }
 
 $sqlAdminArgs.Add("-v")

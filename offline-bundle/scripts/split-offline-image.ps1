@@ -60,19 +60,35 @@ Visszaallitas:
 '@
 }
 
+function Get-DefaultArchivePath {
+    $bundleLocalArchive = Join-Path $ProjectRoot "images\podman-images.tar"
+    if (Test-Path -LiteralPath $bundleLocalArchive) {
+        return $bundleLocalArchive
+    }
+    return (Join-Path $ProjectRoot "offline-bundle\images\podman-images.tar")
+}
+
+function Get-DefaultOutputDir {
+    $bundleLocalImages = Join-Path $ProjectRoot "images"
+    if (Test-Path -LiteralPath $bundleLocalImages) {
+        return (Join-Path $bundleLocalImages "split")
+    }
+    return (Join-Path $ProjectRoot "offline-bundle\images\split")
+}
+
 if ($Help) {
     Show-Help
     exit 0
 }
 
 if ([string]::IsNullOrWhiteSpace($ArchivePath)) {
-    $ArchivePath = Join-Path $ProjectRoot "offline-bundle\images\podman-images.tar"
+    $ArchivePath = Get-DefaultArchivePath
 } elseif (-not [System.IO.Path]::IsPathRooted($ArchivePath)) {
     $ArchivePath = Join-Path $ProjectRoot $ArchivePath
 }
 
 if ([string]::IsNullOrWhiteSpace($OutputDir)) {
-    $OutputDir = Join-Path $ProjectRoot "offline-bundle\images\split"
+    $OutputDir = Get-DefaultOutputDir
 } elseif (-not [System.IO.Path]::IsPathRooted($OutputDir)) {
     $OutputDir = Join-Path $ProjectRoot $OutputDir
 }
@@ -137,4 +153,3 @@ finally {
 $manifestPath = Join-Path $OutputDir "podman-images.tar.parts.sha256"
 $manifestLines | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 Write-Output "Manifest: $manifestPath"
-

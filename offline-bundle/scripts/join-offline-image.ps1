@@ -50,19 +50,35 @@ Parameterek:
 '@
 }
 
+function Get-DefaultPartsDir {
+    $bundleLocalParts = Join-Path $ProjectRoot "images\split"
+    if (Test-Path -LiteralPath $bundleLocalParts) {
+        return $bundleLocalParts
+    }
+    return (Join-Path $ProjectRoot "offline-bundle\images\split")
+}
+
+function Get-DefaultArchivePath {
+    $bundleLocalImages = Join-Path $ProjectRoot "images"
+    if (Test-Path -LiteralPath $bundleLocalImages) {
+        return (Join-Path $bundleLocalImages "podman-images.tar")
+    }
+    return (Join-Path $ProjectRoot "offline-bundle\images\podman-images.tar")
+}
+
 if ($Help) {
     Show-Help
     exit 0
 }
 
 if ([string]::IsNullOrWhiteSpace($PartsDir)) {
-    $PartsDir = Join-Path $ProjectRoot "offline-bundle\images\split"
+    $PartsDir = Get-DefaultPartsDir
 } elseif (-not [System.IO.Path]::IsPathRooted($PartsDir)) {
     $PartsDir = Join-Path $ProjectRoot $PartsDir
 }
 
 if ([string]::IsNullOrWhiteSpace($ArchivePath)) {
-    $ArchivePath = Join-Path $ProjectRoot "offline-bundle\images\podman-images.tar"
+    $ArchivePath = Get-DefaultArchivePath
 } elseif (-not [System.IO.Path]::IsPathRooted($ArchivePath)) {
     $ArchivePath = Join-Path $ProjectRoot $ArchivePath
 }
@@ -74,7 +90,9 @@ if ((Test-Path -LiteralPath $ArchivePath) -and -not $Overwrite) {
     throw "Archive already exists: $ArchivePath. Use -Overwrite to replace it."
 }
 
-$parts = @(Get-ChildItem -LiteralPath $PartsDir -Filter "podman-images.tar.part*" -File | Sort-Object Name)
+$parts = @(Get-ChildItem -LiteralPath $PartsDir -Filter "podman-images.tar.part*" -File |
+    Where-Object { $_.Name -match "^podman-images[.]tar[.]part\d+$" } |
+    Sort-Object Name)
 if ($parts.Count -eq 0) {
     throw "No parts found in: $PartsDir"
 }

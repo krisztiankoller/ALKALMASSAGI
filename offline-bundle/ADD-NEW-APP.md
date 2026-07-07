@@ -19,6 +19,7 @@ Egy app akkor illeszkedik jol, ha:
 - Kafka-ba tovabbit egy destination topicot.
 - SQL Serverbe audit sort ir.
 - Minden kapcsolat `application.yaml`-bol vagy environment variable-bol jon.
+- A konkret Kafka topic es audit DB nevek a `services.json`-ban vannak.
 - Van `src/main/resources/security` konyvtara JKS fajloknak.
 
 ## App nev konvencio
@@ -149,6 +150,22 @@ Az uj appban legyen:
 app7\src\main\resources\application.yaml
 ```
 
+Ha mas runtime konfiguracio fajlnevet szeretnel, hasznalhatsz peldaul ilyet is:
+
+```text
+app7\src\main\resources\application-local.yaml
+```
+
+Ekkor a `services.json` app7 service bejegyzeseben add meg:
+
+```json
+"applicationYaml": "application-local.yaml"
+```
+
+A deploy script ezt a fajlt mountolja majd a kontenerbe
+`/app/config/application.yaml` neven, ezert a Spring Boot alkalmazasnak nem kell
+tudnia a host oldali fajlnevrol.
+
 Fontos reszek:
 
 ```yaml
@@ -186,32 +203,23 @@ local-health:
     initial-delay-ms: 5000
 
 pipeline:
-  service-name: app7
-  database-name: app7_audit
-  schema-name: dbo
-  audit-table-name: audit_events
+  resource-refs:
+    database: app7Audit
+  service-name: '${PIPELINE_SERVICE_NAME}'
+  database-name: '${PIPELINE_DATABASE_NAME}'
+  schema-name: '${PIPELINE_SCHEMA_NAME}'
+  audit-table-name: '${PIPELINE_AUDIT_TABLE_NAME}'
   source-topic: app7.source
-  destination-topic: app8.source
-  topic-partitions: 1
-  topic-replicas: 1
-  forward-timeout-seconds: 30
-  create-database: true
-  create-audit-table: true
-```
-
-Ha az `app7` az utolso app, akkor:
-
-```yaml
-pipeline:
   destination-topic: app8.final
+  topic-partitions: '${PIPELINE_TOPIC_PARTITIONS}'
+  topic-replicas: '${PIPELINE_TOPIC_REPLICAS}'
+  forward-timeout-seconds: 30
 ```
 
-Vagy hasznalhatsz barmilyen vegso topic nevet, peldaul:
-
-```yaml
-pipeline:
-  destination-topic: app7.final
-```
+Fontos: az adatbazis `PIPELINE_*` ertekeit nem kezzel kell Windows env-be
+allitani. A `scripts\deploy-springboot-pods.ps1` az app YAML `resource-refs`
+adatbazis referenciat oldja fel a `services.json` resource katalogusabol. A
+Kafka topic nevek es a consumer group ID kozvetlenul az app YAML-ben vannak.
 
 ## 5. Kafka lanc frissitese
 
@@ -229,27 +237,14 @@ Uj `app7`-tel:
 app1.source -> app2.source -> app3.source -> app4.source -> app5.source -> app6.source -> app7.source -> app8.final
 ```
 
-Ehhez modositsd:
-
-```text
-app6\src\main\resources\application.yaml
-```
-
-Regi:
-
-```yaml
-pipeline:
-  destination-topic: app7.final
-```
-
-Uj:
+Ehhez az app6 `application.yaml` fajljaban modositsd a cel topic nevet:
 
 ```yaml
 pipeline:
   destination-topic: app7.source
 ```
 
-Az uj app7:
+Az uj app7 `application.yaml` pedig igy induljon tovabb:
 
 ```yaml
 pipeline:
@@ -285,18 +280,83 @@ classpath:security/rest-client-truststore.jks
 
 ## 7. services.json frissitese
 
-Adj hozza uj bejegyzest:
+Adj hozza a topicot a `kafkaTopics` katalogushoz:
+
+```json
+"app7Source": {
+  "name": "app7.source",
+  "partitions": 1,
+  "replicas": 1
+},
+"app8Final": {
+  "name": "app8.final",
+  "partitions": 1,
+  "replicas": 1
+}
+```
+
+Adj hozza az audit adatbazist a `databases` katalogushoz:
+
+```json
+"app7Audit": {
+  "name": "app7_audit",
+  "schema": "dbo",
+  "managed": true,
+  "connectionString": "jdbc:sqlserver://mssql:1433;databaseName=app7_audit;encrypt=false;trustServerCertificate=true",
+  "username": "sa",
+  "password": "Alkalmassagi_2026!",
+  "schemaScript": "sql/app7-audit.sql"
+}
+```
+
+A `schemaScript` mindig app/DB-specifikus, statikus SQL fajl legyen. Ne legyen
+benne token vagy helyettesito valtozo. A lenyeg, hogy tobbszor is lefuthasson
+hiba es duplikalt objektum letrehozasa nelkul.
+
+Kulso adatbazisnal:
+
+```json
+"app7Audit": {
+  "name": "app7_audit",
+  "schema": "dbo",
+  "managed": false,
+  "connectionString": "jdbc:sqlserver://kulso-sql-ceg.local:1433;databaseName=app7_audit;encrypt=true;trustServerCertificate=false",
+  "username": "app7_user",
+  "password": "app7_password",
+  "schemaScript": "sql/app7-audit.sql"
+}
+```
+
+`managed: false` eseten a lokalis infra script nem hozza letre es nem torli a DB-t.
+Az app es a DB admin kapcsolat ettol meg a megadott `connectionString`,
+`username`, `password` ertekekkel fog menni.
+
+Idempotens SQL pelda:
+
+```sql
+USE [app7_audit];
+
+IF OBJECT_ID(N'dbo.audit_events', N'U') IS NULL
+BEGIN
+    CREATE TABLE [dbo].[audit_events] (
+        id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY
+    );
+END;
+```
+
+Vegul adj hozza uj service bejegyzest a `services` listahoz:
 
 ```json
 {
-  "name": "app7",
-  "projectDir": "app7",
-  "hostPort": 40012,
-  "containerPort": 8080,
-  "imageTag": "local/app7:dev",
-  "env": {
-    "SPRING_PROFILES_ACTIVE": "podman",
-    "JAVA_OPTS": "-Xms128m -Xmx512m"
+      "name": "app7",
+      "projectDir": "app7",
+      "hostPort": 40012,
+      "containerPort": 8080,
+      "imageTag": "local/app7:dev",
+      "applicationYaml": "application.yaml",
+      "env": {
+        "SPRING_PROFILES_ACTIVE": "podman",
+        "JAVA_OPTS": "-Xms128m -Xmx512m"
   }
 }
 ```
@@ -310,15 +370,24 @@ Ha a JAR nem a szokasos `target` konyvtarban van, adhatsz meg `jarPath`-ot:
   "jarPath": "app7/target/app7-0.0.1-SNAPSHOT.jar",
   "hostPort": 40012,
   "containerPort": 8080,
-  "imageTag": "local/app7:dev"
+  "imageTag": "local/app7:dev",
+  "applicationYaml": "application-local.yaml"
 }
 ```
 
+Fontos: a service bejegyzesben nincs `databaseRef`, `sourceTopicRef` vagy
+`destinationTopicRef`, es nincs `consumerGroupId` sem. A Kafka topic nevek es a
+consumer group ID az app sajat `application.yaml` fajljaban vannak.
+Az `applicationYaml` csak a host oldali runtime YAML fajlnevet valasztja ki.
+
 ## 8. DB admin kapcsolat
 
-A `scripts\deploy-infra-pods.ps1` a `services.json` alapjan epiti a DB admin kapcsolatokat.
+A `scripts\deploy-infra-pods.ps1` a `services.json` `databases` katalogusa
+alapjan epiti a DB admin kapcsolatokat, es ugyanitt hozza letre az audit
+adatbazisokat/táblákat.
 
-Ha van `app7` a `services.json`-ban, akkor a DB admin UI-ban megjelenik:
+Ha van `app7Audit` a `services.json` `databases` reszeben, akkor a DB admin
+UI-ban megjelenik:
 
 ```text
 app7_audit
@@ -394,9 +463,18 @@ Pelda `services.json` reszlet:
   "projectDir": "app7",
   "hostPort": 40012,
   "containerPort": 8080,
-  "imageTag": "local/app7:dev"
+  "imageTag": "local/app7:dev",
+  "env": {
+    "SPRING_PROFILES_ACTIVE": "podman",
+    "JAVA_OPTS": "-Xms128m -Xmx512m"
+  }
 }
 ```
+
+Az `app7Audit` DB kapcsolat nem itt van, hanem az
+`app7\src\main\resources\application.yaml` `pipeline.resource-refs` reszeben.
+A Kafka routing ugyanabban az `application.yaml` fajlban kozvetlen topic nevvel
+szerepel, peldaul `source-topic: app7.source` es `destination-topic: app8.final`.
 
 Az export script ezt csinalja:
 
@@ -511,16 +589,20 @@ Ha az `app7` mar letezik valahol repokent, ezt nezd vegig:
 - Spring Boot JAR buildelheto Mavenbol.
 - Java verzio kompatibilis a builder image-dzsel.
 - Van `/actuator/health`.
-- Van `application.yaml`, nem csak `application.properties`.
+- Van YAML konfiguracio, alapbol `application.yaml`. Ha mas a neve, a
+  `services.json` service bejegyzesben szerepel az `applicationYaml`.
 - DB kapcsolat YAML-bol jon.
 - Kafka bootstrap YAML-bol jon.
-- Topic nevek YAML-bol jonnek.
+- Topic nevek es consumer group ID az app YAML-ben vannak.
+- Az audit DB kapcsolati adatai a `services.json` adatbazis katalogusabol jonnek.
 - App port YAML-bol jon.
 - JKS fajlok `src/main/resources/security` alatt vannak.
 - Proxy beallitas nincs a forrasba egetve; ha kell, a projekt gyokerben levo `proxy.config.json` kezeli.
 - Nincs beegetett abszolut Windows utvonal.
 - Nincs beegetett gepnev/IP, amit masik gepen at kellene irni.
 - `services.json` tartalmazza az appot.
+- `services.json` `kafkaTopics` tartalmazza az uj source/cel topicokat.
+- `services.json` `databases` tartalmazza az uj audit adatbazist.
 - `nifi-flows.yaml` tartalmazza az apphoz tartozo file-to-Kafka topicot, ha fajlbol is akarsz uzenetet kuldeni ra.
 - Root `pom.xml` tartalmazza Maven module-kent, vagy `services.json` tartalmaz `jarPath`-ot.
 - Offline bundle ujra lett generalva.
@@ -535,7 +617,8 @@ Az app alatt nincs:
 src\main\resources\application.yaml
 ```
 
-Megoldas: hozd letre, vagy javitsd a `services.json` `projectDir` erteket.
+Megoldas: hozd letre, vagy javitsd a `services.json` `projectDir` /
+`applicationYaml` erteket.
 
 ### No runnable JAR found
 

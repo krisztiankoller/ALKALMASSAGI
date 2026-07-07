@@ -46,10 +46,10 @@ Csak ujrainditas mar meglevo image-ekbol:
     -SkipBuild
 Mit csinal:
   1. Beolvassa a services.json fajlt.
-  2. Minden service-hez ellenorzi az application.yaml fajlt.
+  2. Minden service-hez ellenorzi a runtime application YAML fajlt.
   3. Ha nincs -SkipBuild, megkeresi a target alatti runnable JAR-t es image-et buildel.
   4. Letrehozza vagy ujra letrehozza az appN-pod podot.
-  5. Mountolja az app application.yaml fajljat /app/config/application.yaml ala.
+  5. Mountolja az app runtime YAML fajljat /app/config/application.yaml ala.
   6. Beallitja a health checket: /actuator/health.
   7. Elinditja az app kontenert a devnet networkon.
 Parameterek:
@@ -82,7 +82,22 @@ Parameterek:
   --help
       Ezt a reszletes leirast irja ki es nem indit appokat.
 services.json fontos mezok:
-  name, projectDir, imageTag, hostPort, containerPort, env, jarPath
+  Uj ajanlott forma:
+    kafkaTopics, databases, services
+  Service mezok:
+    name, projectDir, imageTag, hostPort, containerPort, env, jarPath,
+    applicationYaml
+  - applicationYaml
+      Opcionalis. Ha nincs megadva: application.yaml.
+      Ha csak fajlnev, akkor az app src/main/resources konyvtaraban keresi.
+      Pelda: "application-local.yaml"
+      Ha relativ utvonal, akkor a service projectDir konyvtarahoz kepest ertelmezi.
+      A kontenerben mindig /app/config/application.yaml neven lesz mountolva.
+  A DB resource kapcsolat nem a service bejegyzesben van, hanem az app
+  application.yaml fajljaban a pipeline.resource-refs blokkban. A script ezt
+  oldja fel a services.json databases katalogusabol, es PIPELINE_* env
+  valtozokent adja at az app kontenernek. A Kafka topic nevek es a consumer
+  group id-k kozvetlenul az app application.yaml fajljaban vannak.
 Eredmeny:
   app1-pod ... app6-pod, mindegyik kulon podban, egymast DNS nevvel latjak:
   app1, app2, app3, app4, app5, app6, kafka, mssql
@@ -346,16 +361,183 @@ function Recreate-Pod {
 }
 function Add-EnvArgs {
     param(
-        [System.Collections.Generic.List[string]]$Args,
+        [System.Collections.Generic.List[string]]$ArgumentList,
         [object]$EnvObject
     )
     if ($null -eq $EnvObject) {
         return
     }
     foreach ($property in $EnvObject.PSObject.Properties) {
-        $Args.Add("-e")
-        $Args.Add("$($property.Name)=$($property.Value)")
+        $ArgumentList.Add("-e")
+        $ArgumentList.Add("$($property.Name)=$($property.Value)")
     }
+}
+function Get-JsonPropertyValue {
+    param(
+        [object]$Object,
+        [string]$Name
+    )
+    if ($null -eq $Object) {
+        return $null
+    }
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        return $null
+    }
+    return $property.Value
+}
+function Get-ServicesConfig {
+    param([string]$Path)
+    $json = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+    $serviceList = Get-JsonPropertyValue -Object $json -Name "services"
+    if ($null -eq $serviceList) {
+        $serviceList = $json
+    }
+    return [ordered]@{
+        services = @($serviceList)
+        kafkaTopics = Get-JsonPropertyValue -Object $json -Name "kafkaTopics"
+        databases = Get-JsonPropertyValue -Object $json -Name "databases"
+    }
+}
+function Get-ConfigMapEntry {
+    param(
+        [object]$Map,
+        [string]$Key,
+        [string]$MapName
+    )
+    if ([string]::IsNullOrWhiteSpace($Key)) {
+        return $null
+    }
+    $entry = Get-JsonPropertyValue -Object $Map -Name $Key
+    if ($null -eq $entry) {
+        throw "Unknown $MapName reference '$Key' in services.json."
+    }
+    return $entry
+}
+function Read-ApplicationResourceRefs {
+    param([string]$ApplicationYaml)
+
+    $refs = [ordered]@{}
+    $inPipeline = $false
+    $inResourceRefs = $false
+    foreach ($line in (Get-Content -LiteralPath $ApplicationYaml -Encoding UTF8)) {
+        if ($line -match "^pipeline:\s*$") {
+            $inPipeline = $true
+            $inResourceRefs = $false
+            continue
+        }
+        if ($inPipeline -and $line -match "^\S") {
+            $inPipeline = $false
+            $inResourceRefs = $false
+        }
+        if (-not $inPipeline) {
+            continue
+        }
+        if ($line -match "^\s{2}resource-refs:\s*$") {
+            $inResourceRefs = $true
+            continue
+        }
+        if ($inResourceRefs -and $line -match "^\s{2}\S") {
+            break
+        }
+        if ($inResourceRefs -and $line -match "^\s{4}([A-Za-z0-9_-]+):\s*['""]?([^'""]+)['""]?\s*$") {
+            $refs[$Matches[1]] = $Matches[2].Trim()
+        }
+    }
+    return $refs
+}
+function Add-ResolvedServiceEnvironment {
+    param(
+        [System.Collections.Specialized.OrderedDictionary]$Env,
+        [object]$Service,
+        [string]$ApplicationYaml,
+        [object]$Databases,
+        [string]$SqlPassword
+    )
+    $name = [string]$Service.name
+    $Env["PIPELINE_SERVICE_NAME"] = $name
+    $Env["SPRING_APPLICATION_NAME"] = $name
+
+    if (-not [string]::IsNullOrWhiteSpace($SqlPassword)) {
+        $Env["SPRING_DATASOURCE_PASSWORD"] = $SqlPassword
+    }
+
+    $resourceRefs = Read-ApplicationResourceRefs -ApplicationYaml $ApplicationYaml
+
+    $databaseRef = [string]$resourceRefs["database"]
+    $database = Get-ConfigMapEntry -Map $Databases -Key $databaseRef -MapName "database"
+    if ($null -ne $database) {
+        $Env["PIPELINE_DATABASE_NAME"] = [string](Get-JsonPropertyValue -Object $database -Name "name")
+        $Env["PIPELINE_SCHEMA_NAME"] = [string](Get-JsonPropertyValue -Object $database -Name "schema")
+        $connectionString = [string](Get-JsonPropertyValue -Object $database -Name "connectionString")
+        $username = [string](Get-JsonPropertyValue -Object $database -Name "username")
+        $password = [string](Get-JsonPropertyValue -Object $database -Name "password")
+        if (-not [string]::IsNullOrWhiteSpace($connectionString)) {
+            $Env["SPRING_DATASOURCE_URL"] = $connectionString
+        }
+        if (-not [string]::IsNullOrWhiteSpace($username)) {
+            $Env["SPRING_DATASOURCE_USERNAME"] = $username
+        }
+        if (-not [string]::IsNullOrWhiteSpace($password)) {
+            $Env["SPRING_DATASOURCE_PASSWORD"] = $password
+        }
+    }
+
+    foreach ($item in @(
+        @("PIPELINE_SCHEMA_NAME", "dbo"),
+        @("PIPELINE_AUDIT_TABLE_NAME", "audit_events"),
+        @("PIPELINE_TOPIC_PARTITIONS", "1"),
+        @("PIPELINE_TOPIC_REPLICAS", "1")
+    )) {
+        if ([string]::IsNullOrWhiteSpace([string]$Env[$item[0]])) {
+            $Env[$item[0]] = $item[1]
+        }
+    }
+}
+function Add-MergedEnvArgs {
+    param(
+        [System.Collections.Generic.List[string]]$ArgumentList,
+        [object]$Service,
+        [string]$ApplicationYaml,
+        [object]$Databases,
+        [string]$SqlPassword
+    )
+    $envMap = [ordered]@{}
+    Add-ResolvedServiceEnvironment -Env $envMap -Service $Service -ApplicationYaml $ApplicationYaml -Databases $Databases -SqlPassword $SqlPassword
+    if ($null -ne $Service.env) {
+        foreach ($property in $Service.env.PSObject.Properties) {
+            $envMap[$property.Name] = [string]$property.Value
+        }
+    }
+    foreach ($key in $envMap.Keys) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$envMap[$key])) {
+            $ArgumentList.Add("-e")
+            $ArgumentList.Add("${key}=$($envMap[$key])")
+        }
+    }
+}
+function Resolve-ServiceApplicationYaml {
+    param(
+        [object]$Service,
+        [string]$ProjectDir
+    )
+    $configured = [string](Get-JsonPropertyValue -Object $Service -Name "applicationYaml")
+    if ([string]::IsNullOrWhiteSpace($configured)) {
+        $configured = [string](Get-JsonPropertyValue -Object $Service -Name "applicationConfig")
+    }
+    if ([string]::IsNullOrWhiteSpace($configured)) {
+        $configured = "application.yaml"
+    }
+
+    if ([System.IO.Path]::IsPathRooted($configured)) {
+        return $configured
+    }
+
+    if ($configured -match "[\\/]" -or $configured -match "^[.][.]?[\\/]") {
+        return (Join-Path $ProjectDir $configured)
+    }
+
+    return (Join-Path $ProjectDir (Join-Path "src\main\resources" $configured))
 }
 if (-not (Test-Path -LiteralPath $ServicesFile)) {
     if (-not [System.IO.Path]::IsPathRooted($ServicesFile)) {
@@ -375,7 +557,8 @@ $effectiveHttpsProxy = Resolve-ProxyUrl -Url $(if ([string]::IsNullOrWhiteSpace(
 $effectiveNoProxy = $script:NoProxy
 Set-ProxyEnvironment -HttpProxy $effectiveHttpProxy -HttpsProxy $effectiveHttpsProxy -NoProxy $effectiveNoProxy
 Ensure-Network $NetworkName
-$services = Get-Content -LiteralPath $ServicesFile -Raw -Encoding UTF8 | ConvertFrom-Json
+$servicesConfig = Get-ServicesConfig -Path $ServicesFile
+$services = $servicesConfig.services
 New-Item -ItemType Directory -Force -Path $BuildRoot | Out-Null
 foreach ($service in $services) {
     $name = [string]$service.name
@@ -397,7 +580,7 @@ foreach ($service in $services) {
     $imageTag = if ($service.imageTag) { [string]$service.imageTag } else { "local/${name}:dev" }
     $podName = "${name}-pod"
     $buildDir = Join-Path $BuildRoot $name
-    $applicationYaml = Join-Path $projectDir "src\main\resources\application.yaml"
+    $applicationYaml = Resolve-ServiceApplicationYaml -Service $service -ProjectDir $projectDir
     if (-not (Test-Path -LiteralPath $applicationYaml)) {
         throw "Missing application YAML for service '$name': $applicationYaml"
     }
@@ -449,7 +632,7 @@ foreach ($service in $services) {
     foreach ($arg in $baseRunArgs) {
         $runArgs.Add([string]$arg)
     }
-    Add-EnvArgs -Args $runArgs -EnvObject $service.env
+    Add-MergedEnvArgs -ArgumentList $runArgs -Service $service -ApplicationYaml $applicationYaml -Databases $servicesConfig.databases -SqlPassword $SqlPassword
     $runArgs.Add($imageTag)
     & podman @runArgs
 }

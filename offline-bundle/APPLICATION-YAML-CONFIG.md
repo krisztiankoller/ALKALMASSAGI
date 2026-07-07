@@ -9,6 +9,23 @@ Minden Spring Boot app sajat konfiguracios fajlja:
 - `app5/src/main/resources/application.yaml`
 - `app6/src/main/resources/application.yaml`
 
+Ha mas fajlnevet szeretnel hasznalni, peldaul `application-local.yaml`, akkor
+az adott app service bejegyzeseben add meg:
+
+```json
+{
+  "name": "app1",
+  "projectDir": "app1",
+  "applicationYaml": "application-local.yaml"
+}
+```
+
+Ha az `applicationYaml` csak fajlnev, akkor a script az adott app
+`src/main/resources` konyvtaraban keresi. Relativ utvonal eseten a `projectDir`
+konyvtarahoz kepest ertelmezi. A kontenerben mindig
+`/app/config/application.yaml` neven lesz mountolva, igy Spring Boot oldalon nem
+kell plusz beallitas.
+
 Minden app sajat JAR-ba csomagolt security/JKS konyvtara:
 
 - `app1/src/main/resources/security/`
@@ -68,6 +85,20 @@ Windows hostrol: localhost,40000
 Az appok `application.yaml` fajljaiban alapbol a konteneres `mssql:1433`
 kapcsolat legyen, mert az appok podban futnak. SSMS, Azure Data Studio vagy mas
 Windowsos SQL kliens eseten a host portot kell hasznalni: `localhost,40000`.
+
+### Kafka consumer group
+
+```yaml
+spring:
+  kafka:
+    consumer:
+      group-id: app1-group
+```
+
+Minden consumer group ID kozvetlenul az adott app `application.yaml` fajljaban
+van. A `services.json` service bejegyzeseiben nincs `consumerGroupId`.
+Minden mas Spring Kafka consumer beallitas tovabbra is szabadon tarthato az
+`application.yaml` fajlban.
 Reszletek: `SQL-SERVER-CONNECTION.md`.
 
 ### Kafka
@@ -80,24 +111,115 @@ spring:
 
 Kulsos Kafka clusternel itt kell megadni a broker cimeket.
 
-### Topicok es audit tabla
+### Topicok es audit adatbazisok
 
 ```yaml
 pipeline:
-  service-name: app1
-  database-name: app1_audit
-  schema-name: dbo
-  audit-table-name: audit_events
+  resource-refs:
+    database: app1Audit
+  service-name: '${PIPELINE_SERVICE_NAME}'
+  database-name: '${PIPELINE_DATABASE_NAME}'
+  schema-name: '${PIPELINE_SCHEMA_NAME}'
+  audit-table-name: '${PIPELINE_AUDIT_TABLE_NAME}'
   source-topic: app1.source
   destination-topic: app2.source
-  topic-partitions: 1
-  topic-replicas: 1
+  topic-partitions: '${PIPELINE_TOPIC_PARTITIONS}'
+  topic-replicas: '${PIPELINE_TOPIC_REPLICAS}'
   forward-timeout-seconds: 30
-  create-database: true
-  create-audit-table: true
 ```
 
-Itt allithato minden app sajat forras topicja, cel topicja, audit DB-je, tabla neve es topic letrehozasi parametere.
+Az app YAML `resource-refs` blokkja most az audit adatbazis resource kulcsat
+mondja meg. A Kafka topic nevek kozvetlenul az `application.yaml` fajlban
+vannak, hogy az app routingja ranezesre lathato legyen.
+
+A `services.json` tovabbra is tartalmazza a Kafka topic katalogust, mert az
+infra script ebbol hozza letre es tartja karban a topicokat. Az audit
+adatbazisok szinten a projekt gyokerben levo `services.json` fajlban vannak:
+
+```json
+{
+  "kafkaTopics": {
+    "app1Source": {
+      "name": "app1.source",
+      "partitions": 1,
+      "replicas": 1
+    }
+  },
+  "databases": {
+    "app1Audit": {
+      "name": "app1_audit",
+      "schema": "dbo",
+      "managed": true,
+      "connectionString": "jdbc:sqlserver://mssql:1433;databaseName=app1_audit;encrypt=false;trustServerCertificate=true",
+      "username": "sa",
+      "password": "Alkalmassagi_2026!",
+      "schemaScript": "sql/app1-audit.sql"
+    }
+  },
+  "services": [
+    {
+      "name": "app1",
+      "projectDir": "app1",
+      "hostPort": 40005,
+      "containerPort": 8080,
+      "imageTag": "local/app1:dev",
+      "applicationYaml": "application-local.yaml"
+    }
+  ]
+}
+```
+
+A `scripts\deploy-springboot-pods.ps1` az app YAML `resource-refs` ertekeit
+oldja fel a `services.json` adatbazis katalogusabol, es `PIPELINE_*` env
+valtozokent adja at az app kontenernek. Kafka topic nevet es consumer group ID-t
+nem ad at, ezek az app YAML-bol jonnek.
+
+Fontos: a `services.json` service bejegyzeseiben nincs kozvetlen
+`databaseRef`, `sourceTopicRef`, `destinationTopicRef` vagy `consumerGroupId`.
+A service lista csak az app pod metadataja: nev, konyvtar, port, image, env.
+Az `applicationYaml` is ide tartozik: ez csak azt mondja meg, melyik host oldali
+YAML fajlt mountolja a script az app kontenerbe.
+
+Az `auditTable` nem a `services.json` resze. Az appok a
+`PIPELINE_AUDIT_TABLE_NAME` default erteket hasznaljak, ami `audit_events`.
+Ha ezt at akarod irni, azt app runtime konfiguracioban tedd, ne a resource
+katalogusban.
+
+A resource-ok letrehozasat es torleset az infra script vegzi:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-infra-pods.ps1 `
+  -SqlPassword "Alkalmassagi_2026!" `
+  -ExternalHostName localhost
+```
+
+Az infra script a `services.json` `kafkaTopics` es `databases` katalogusait
+tekinti kezelt resource listanak. Amit korabban o kezelt, de mar nincs a
+JSON-ben, azt torli. A kezelt lista state fajlja:
+
+```text
+data\managed-resources.json
+```
+
+A `schemaScript` SQL fajl minden infra inditaskor lefut az adott DB-ben. Ezert
+idempotensnek kell lennie: ellenorizze, hogy a schema, tabla, oszlop, index vagy
+egyeb objektum letezik-e, es csak akkor hozza letre vagy modositsa, ha kell.
+
+Fontos: az SQL scriptek statikusak. Ne hasznalj bennuk projekt-szintu
+helyettesito valtozokat vagy tokeneket. Minden adatbazishoz sajat script tartozik,
+peldaul `sql/app1-audit.sql`, `sql/app2-audit.sql`.
+
+Kulso MSSQL hasznalatahoz a database resource-ban allitsd at:
+
+```json
+"managed": false,
+"connectionString": "jdbc:sqlserver://kulso-sql-ceg.local:1433;databaseName=app1_audit;encrypt=true;trustServerCertificate=false",
+"username": "app1_user",
+"password": "app1_password"
+```
+
+Ilyenkor az infra script nem hozza letre es nem torli az adatbazist. Az app es a
+DB admin felulet viszont ezt a kapcsolati adatot hasznalja.
 
 ### Podman health check extra csomag nelkul
 

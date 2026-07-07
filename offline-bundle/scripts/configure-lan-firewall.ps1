@@ -118,7 +118,8 @@ $ports = [System.Collections.Generic.List[int]]::new()
 $InfraPorts | ForEach-Object { $ports.Add($_) }
 
 if (Test-Path -Path $ServicesFile) {
-    $services = Get-Content -Path $ServicesFile -Raw | ConvertFrom-Json
+    $servicesJson = Get-Content -Path $ServicesFile -Raw | ConvertFrom-Json
+    $services = if ($servicesJson.PSObject.Properties["services"]) { $servicesJson.services } else { $servicesJson }
     foreach ($service in $services) {
         if ($service.hostPort) {
             $ports.Add([int]$service.hostPort)

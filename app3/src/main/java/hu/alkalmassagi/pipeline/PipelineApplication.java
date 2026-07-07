@@ -16,10 +16,8 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.context.annotation.Bean;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.kafka.config.TopicBuilder;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
 import org.springframework.scheduling.annotation.EnableScheduling;
@@ -33,22 +31,6 @@ public class PipelineApplication {
     public static void main(String[] args) {
         SpringApplication.run(PipelineApplication.class, args);
     }
-
-    @Bean
-    org.apache.kafka.clients.admin.NewTopic sourceTopic(PipelineProperties properties) {
-        return TopicBuilder.name(properties.sourceTopic())
-            .partitions(properties.topicPartitions())
-            .replicas(properties.topicReplicas())
-            .build();
-    }
-
-    @Bean
-    org.apache.kafka.clients.admin.NewTopic destinationTopic(PipelineProperties properties) {
-        return TopicBuilder.name(properties.destinationTopic())
-            .partitions(properties.topicPartitions())
-            .replicas(properties.topicReplicas())
-            .build();
-    }
 }
 
 @ConfigurationProperties(prefix = "pipeline")
@@ -61,9 +43,7 @@ record PipelineProperties(
     String destinationTopic,
     int topicPartitions,
     short topicReplicas,
-    long forwardTimeoutSeconds,
-    boolean createDatabase,
-    boolean createAuditTable
+    long forwardTimeoutSeconds
 ) {
 }
 
@@ -87,28 +67,6 @@ class AuditService {
         String schemaName = safeIdentifier(properties.schemaName(), "schemaName");
         String tableName = safeIdentifier(properties.auditTableName(), "auditTableName");
         this.auditTableName = "[" + databaseName + "].[" + schemaName + "].[" + tableName + "]";
-
-        if (properties.createDatabase()) {
-            jdbc.execute("IF DB_ID(N'" + databaseName + "') IS NULL CREATE DATABASE [" + databaseName + "]");
-        }
-
-        if (properties.createAuditTable()) {
-            jdbc.execute("""
-                IF OBJECT_ID(N'%s.%s.%s', N'U') IS NULL
-                EXEC(N'CREATE TABLE %s (
-                    id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
-                    event_time DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
-                    service_name NVARCHAR(128) NOT NULL,
-                    direction NVARCHAR(32) NOT NULL,
-                    source_topic NVARCHAR(255) NULL,
-                    destination_topic NVARCHAR(255) NULL,
-                    message_key NVARCHAR(512) NULL,
-                    payload NVARCHAR(MAX) NULL,
-                    status NVARCHAR(64) NOT NULL,
-                    error_message NVARCHAR(MAX) NULL
-                )')
-                """.formatted(databaseName, schemaName, tableName, auditTableName));
-        }
 
         log.info("Audit database and table are ready: {}", auditTableName);
     }

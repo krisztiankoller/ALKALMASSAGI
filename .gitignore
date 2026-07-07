@@ -8,6 +8,7 @@
 # Large offline image archive. Keep this out of develop.
 /offline-bundle/images/*.tar
 /offline-bundle/images/*.tar.part*
+/offline-bundle/images/split/
 
 # Local machine/proxy secrets
 /proxy.config.json
@@ -19,4 +20,3 @@
 *.swp
 Thumbs.db
 .DS_Store
-

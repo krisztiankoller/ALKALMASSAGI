@@ -128,10 +128,8 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.context.annotation.Bean;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.kafka.config.TopicBuilder;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
 
@@ -142,22 +140,6 @@ import jakarta.annotation.PostConstruct;
 public class PipelineApplication {
     public static void main(String[] args) {
         SpringApplication.run(PipelineApplication.class, args);
-    }
-
-    @Bean
-    org.apache.kafka.clients.admin.NewTopic sourceTopic(PipelineProperties properties) {
-        return TopicBuilder.name(properties.sourceTopic())
-            .partitions(properties.topicPartitions())
-            .replicas(properties.topicReplicas())
-            .build();
-    }
-
-    @Bean
-    org.apache.kafka.clients.admin.NewTopic destinationTopic(PipelineProperties properties) {
-        return TopicBuilder.name(properties.destinationTopic())
-            .partitions(properties.topicPartitions())
-            .replicas(properties.topicReplicas())
-            .build();
     }
 }
 
@@ -171,9 +153,7 @@ record PipelineProperties(
     String destinationTopic,
     int topicPartitions,
     short topicReplicas,
-    long forwardTimeoutSeconds,
-    boolean createDatabase,
-    boolean createAuditTable
+    long forwardTimeoutSeconds
 ) {
 }
 
@@ -197,28 +177,6 @@ class AuditService {
         String schemaName = safeIdentifier(properties.schemaName(), "schemaName");
         String tableName = safeIdentifier(properties.auditTableName(), "auditTableName");
         this.auditTableName = "[" + databaseName + "].[" + schemaName + "].[" + tableName + "]";
-
-        if (properties.createDatabase()) {
-            jdbc.execute("IF DB_ID(N'" + databaseName + "') IS NULL CREATE DATABASE [" + databaseName + "]");
-        }
-
-        if (properties.createAuditTable()) {
-            jdbc.execute("""
-                IF OBJECT_ID(N'%s.%s.%s', N'U') IS NULL
-                EXEC(N'CREATE TABLE %s (
-                    id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
-                    event_time DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
-                    service_name NVARCHAR(128) NOT NULL,
-                    direction NVARCHAR(32) NOT NULL,
-                    source_topic NVARCHAR(255) NULL,
-                    destination_topic NVARCHAR(255) NULL,
-                    message_key NVARCHAR(512) NULL,
-                    payload NVARCHAR(MAX) NULL,
-                    status NVARCHAR(64) NOT NULL,
-                    error_message NVARCHAR(MAX) NULL
-                )')
-                """.formatted(databaseName, schemaName, tableName, auditTableName));
-        }
 
         log.info("Audit database and table are ready: {}", auditTableName);
     }
@@ -381,7 +339,11 @@ $childPomTemplate = @'
 
 for ($i = 1; $i -le 6; $i++) {
     $appName = "app$i"
+    $sourceTopicName = "$appName.source"
     $nextTopic = if ($i -lt 6) { "app$($i + 1).source" } else { "app7.final" }
+    $sourceTopicRef = "${appName}Source"
+    $destinationTopicRef = if ($i -eq 6) { "app7Final" } else { "app$($i + 1)Source" }
+    $databaseRef = "${appName}Audit"
     $appDir = Join-Path $projectRoot $appName
     $sourceDir = Join-Path $appDir "src\main\java\hu\alkalmassagi\pipeline"
     $resourcesDir = Join-Path $appDir "src\main\resources"
@@ -494,17 +456,17 @@ logging:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n"
 
 pipeline:
-  service-name: $appName
-  database-name: ${appName}_audit
-  schema-name: dbo
-  audit-table-name: audit_events
-  source-topic: $appName.source
+  resource-refs:
+    database: $databaseRef
+  service-name: '`${PIPELINE_SERVICE_NAME}'
+  database-name: '`${PIPELINE_DATABASE_NAME}'
+  schema-name: '`${PIPELINE_SCHEMA_NAME}'
+  audit-table-name: '`${PIPELINE_AUDIT_TABLE_NAME}'
+  source-topic: $sourceTopicName
   destination-topic: $nextTopic
-  topic-partitions: 1
-  topic-replicas: 1
+  topic-partitions: '`${PIPELINE_TOPIC_PARTITIONS}'
+  topic-replicas: '`${PIPELINE_TOPIC_REPLICAS}'
   forward-timeout-seconds: 30
-  create-database: true
-  create-audit-table: true
 
 # Example custom outbound services for future integrations.
 # Nothing in the current code calls these yet, but this is the recommended
@@ -537,23 +499,127 @@ Health endpoint: GET /actuator/health
     Write-Utf8File -Path (Join-Path $appDir "README.md") -Content $readme
 }
 
+$kafkaTopics = [ordered]@{}
+$databases = [ordered]@{}
 $services = @()
 for ($i = 1; $i -le 6; $i++) {
     $appName = "app$i"
+    $sourceTopicRef = "${appName}Source"
+    $destinationTopicRef = if ($i -eq 6) { "app7Final" } else { "app$($i + 1)Source" }
+    $databaseRef = "${appName}Audit"
+    $kafkaTopics[$sourceTopicRef] = [ordered]@{
+        name = "$appName.source"
+        partitions = 1
+        replicas = 1
+    }
+    $databases[$databaseRef] = [ordered]@{
+        name = "${appName}_audit"
+        schema = "dbo"
+        managed = $true
+        connectionString = "jdbc:sqlserver://mssql:1433;databaseName=${appName}_audit;encrypt=false;trustServerCertificate=true"
+        username = "sa"
+        password = "Alkalmassagi_2026!"
+        schemaScript = "sql/${appName}-audit.sql"
+    }
+    $auditSql = @"
+USE [${appName}_audit];
+
+IF SCHEMA_ID(N'dbo') IS NULL
+BEGIN
+    EXEC(N'CREATE SCHEMA [dbo]');
+END;
+
+IF OBJECT_ID(N'dbo.audit_events', N'U') IS NULL
+BEGIN
+    CREATE TABLE [dbo].[audit_events] (
+        id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        event_time DATETIME2 NOT NULL
+            CONSTRAINT [DF_${appName}_audit_audit_events_event_time]
+            DEFAULT SYSUTCDATETIME(),
+        service_name NVARCHAR(128) NOT NULL,
+        direction NVARCHAR(32) NOT NULL,
+        source_topic NVARCHAR(255) NULL,
+        destination_topic NVARCHAR(255) NULL,
+        message_key NVARCHAR(512) NULL,
+        payload NVARCHAR(MAX) NULL,
+        status NVARCHAR(64) NOT NULL,
+        error_message NVARCHAR(MAX) NULL
+    );
+END;
+
+IF COL_LENGTH(N'dbo.audit_events', N'event_time') IS NULL
+BEGIN
+    ALTER TABLE [dbo].[audit_events]
+        ADD event_time DATETIME2 NOT NULL
+            CONSTRAINT [DF_${appName}_audit_audit_events_event_time]
+            DEFAULT SYSUTCDATETIME();
+END;
+
+IF COL_LENGTH(N'dbo.audit_events', N'service_name') IS NULL
+BEGIN
+    ALTER TABLE [dbo].[audit_events] ADD service_name NVARCHAR(128) NULL;
+END;
+
+IF COL_LENGTH(N'dbo.audit_events', N'direction') IS NULL
+BEGIN
+    ALTER TABLE [dbo].[audit_events] ADD direction NVARCHAR(32) NULL;
+END;
+
+IF COL_LENGTH(N'dbo.audit_events', N'source_topic') IS NULL
+BEGIN
+    ALTER TABLE [dbo].[audit_events] ADD source_topic NVARCHAR(255) NULL;
+END;
+
+IF COL_LENGTH(N'dbo.audit_events', N'destination_topic') IS NULL
+BEGIN
+    ALTER TABLE [dbo].[audit_events] ADD destination_topic NVARCHAR(255) NULL;
+END;
+
+IF COL_LENGTH(N'dbo.audit_events', N'message_key') IS NULL
+BEGIN
+    ALTER TABLE [dbo].[audit_events] ADD message_key NVARCHAR(512) NULL;
+END;
+
+IF COL_LENGTH(N'dbo.audit_events', N'payload') IS NULL
+BEGIN
+    ALTER TABLE [dbo].[audit_events] ADD payload NVARCHAR(MAX) NULL;
+END;
+
+IF COL_LENGTH(N'dbo.audit_events', N'status') IS NULL
+BEGIN
+    ALTER TABLE [dbo].[audit_events] ADD status NVARCHAR(64) NULL;
+END;
+
+IF COL_LENGTH(N'dbo.audit_events', N'error_message') IS NULL
+BEGIN
+    ALTER TABLE [dbo].[audit_events] ADD error_message NVARCHAR(MAX) NULL;
+END;
+"@
+    Write-Utf8File -Path (Join-Path $projectRoot "sql\${appName}-audit.sql") -Content $auditSql
     $services += [ordered]@{
         name = $appName
         projectDir = $appName
-        hostPort = 8080 + $i
+        hostPort = 40004 + $i
         containerPort = 8080
         imageTag = "local/${appName}:dev"
+        applicationYaml = "application.yaml"
         env = [ordered]@{
             SPRING_PROFILES_ACTIVE = "podman"
             JAVA_OPTS = "-Xms128m -Xmx512m"
         }
     }
 }
+$kafkaTopics["app7Final"] = [ordered]@{
+    name = "app7.final"
+    partitions = 1
+    replicas = 1
+}
 
-$servicesJson = $services | ConvertTo-Json -Depth 10
+$servicesJson = [ordered]@{
+    kafkaTopics = $kafkaTopics
+    databases = $databases
+    services = $services
+} | ConvertTo-Json -Depth 10
 Write-Utf8File -Path (Join-Path $projectRoot "services.json") -Content $servicesJson
 
 Write-Output "Generated 6 Spring Boot services in $projectRoot"

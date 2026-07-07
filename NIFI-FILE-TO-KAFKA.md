@@ -35,6 +35,26 @@ Alap utvonal:
 data\nifi\drop
 ```
 
+Ez mindig ahhoz a projekt/bundle konyvtarhoz kepest ertendo, ahonnan a stacket
+inditottad. Ha a fejlesztoi repo gyokerebol futott a `deploy-infra-pods.ps1`,
+akkor a drop mappa:
+
+```text
+.\data\nifi\drop
+```
+
+Ha az offline bundle-bol futott a `run-offline.ps1`, akkor a drop mappa:
+
+```text
+.\offline-bundle\data\nifi\drop
+```
+
+Ha mar eleve az `offline-bundle` konyvtarban allsz, akkor ugyanez roviden:
+
+```text
+.\data\nifi\drop
+```
+
 Alap topic/mappa parok:
 
 ```text
@@ -186,6 +206,14 @@ Pelda app1 pipeline inditasahoz:
 ```powershell
 New-Item -ItemType Directory -Force -Path .\data\nifi\drop\app1.source
 Set-Content -Encoding UTF8 -Path .\data\nifi\drop\app1.source\message-001.json -Value '{"id":"nifi-001","text":"hello from file"}'
+```
+
+Offline inditas utan, ha a repo gyokereben allsz es onnan masolsz fajlt, az
+offline bundle sajat drop mappajat hasznald:
+
+```powershell
+New-Item -ItemType Directory -Force -Path .\offline-bundle\data\nifi\drop\app1.source
+Set-Content -Encoding UTF8 -Path .\offline-bundle\data\nifi\drop\app1.source\message-001.json -Value '{"id":"nifi-001","text":"hello from offline file"}'
 ```
 
 Mintafajlok is vannak, de ezek nem a drop mappaban vannak, hogy indulaskor ne

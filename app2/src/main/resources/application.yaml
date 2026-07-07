@@ -85,17 +85,17 @@ logging:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n"
 
 pipeline:
-  service-name: app2
-  database-name: app2_audit
-  schema-name: dbo
-  audit-table-name: audit_events
+  resource-refs:
+    database: app2Audit
+  service-name: '${PIPELINE_SERVICE_NAME}'
+  database-name: '${PIPELINE_DATABASE_NAME}'
+  schema-name: '${PIPELINE_SCHEMA_NAME}'
+  audit-table-name: '${PIPELINE_AUDIT_TABLE_NAME}'
   source-topic: app2.source
   destination-topic: app3.source
-  topic-partitions: 1
-  topic-replicas: 1
+  topic-partitions: '${PIPELINE_TOPIC_PARTITIONS}'
+  topic-replicas: '${PIPELINE_TOPIC_REPLICAS}'
   forward-timeout-seconds: 30
-  create-database: true
-  create-audit-table: true
 
 # Example custom outbound services for future integrations.
 # Nothing in the current pipeline code calls these yet. Keep external URLs,

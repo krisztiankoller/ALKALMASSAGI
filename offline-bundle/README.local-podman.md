@@ -94,8 +94,22 @@ Then verify:
 ```powershell
 podman pod ps
 podman ps --pod
+
+foreach ($port in 40005..40010) {
+  Invoke-RestMethod "http://localhost:$port/actuator/health"
+}
+
+Invoke-WebRequest http://localhost:40002 -UseBasicParsing
+Invoke-WebRequest http://localhost:40003 -UseBasicParsing
+Invoke-WebRequest http://localhost:40004 -UseBasicParsing
+Invoke-WebRequest http://localhost:40011/nifi/ -UseBasicParsing
+
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\send-test-message.ps1
 ```
+
+For the full repeatable test pass, including NiFi file-to-Kafka, MSSQL audit
+row checks, log export, offline bundle export, and offline startup, read
+`TESTING-CHECKLIST.md`.
 
 If only app source changed, run only the build and Spring Boot deploy commands.
 If only infra, NiFi, port, or proxy config changed, run infra deploy and then
