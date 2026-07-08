@@ -111,6 +111,27 @@ Invoke-WebRequest http://localhost:40011/nifi/ -UseBasicParsing
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\send-test-message.ps1
 ```
 
+## Rebuild and redeploy one app
+
+Use this during development when only one Spring Boot app changed:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-apps-with-podman.ps1 `
+  -MavenProjects app3 `
+  -AlsoMake `
+  -SkipTests
+
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-springboot-pods.ps1 `
+  -ServicesFile .\services.json `
+  -ServiceName app3 `
+  -SqlPassword "Alkalmassagi_2026!"
+```
+
+`-MavenProjects app3 -AlsoMake` runs Maven as `mvn -pl app3 -am clean package`.
+`-ServiceName app3` rebuilds only that app image and recreates only `app3-pod`.
+Multiple values are accepted as comma-separated names, for example
+`-MavenProjects app3,app4` and `-ServiceName app3,app4`.
+
 For the full repeatable test pass, including NiFi file-to-Kafka, MSSQL audit
 row checks, log export, offline bundle export, and offline startup, read
 `TESTING-CHECKLIST.md`.

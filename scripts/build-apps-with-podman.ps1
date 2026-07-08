@@ -18,6 +18,8 @@ param(
     [int]$PodmanPullRetryDelaySeconds = 10,
     [int]$MavenBuildRetries = 5,
     [int]$MavenBuildRetryDelaySeconds = 10,
+    [string[]]$MavenProjects = @(),
+    [switch]$AlsoMake,
     [switch]$SkipTests,
     [switch]$Offline,
     [switch]$KeepBuildContainer,
@@ -101,6 +103,15 @@ Fontos parameterek:
   -MavenBuildRetryDelaySeconds
       Varakozas ket sikertelen Maven build probalkozas kozott masodpercben.
       Alapertelmezett: 10
+  -MavenProjects
+      Opcionalis Maven project/module lista a -pl kapcsolohoz. Pelda:
+        -MavenProjects app3
+        -MavenProjects app3,app4
+      Ilyenkor nem a teljes reactor build fut, hanem csak a megadott modul(ok).
+  -AlsoMake
+      Maven -am kapcsolo. A -MavenProjects mellett erdemes hasznalni, hogy a
+      kivalasztott modulok szukseges reactor fuggosegei is ujraepuljenek.
+      Pelda eredmeny: mvn -pl app3 -am clean package.
   -SkipTests
       Maven tesztek kihagyasa: -DskipTests.
   -Offline
@@ -408,6 +419,22 @@ function ConvertTo-MavenNonProxyHosts {
         ForEach-Object { $_.Trim() } |
         Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join "|"
 }
+function Normalize-ListValues {
+    param([string[]]$Values)
+    $result = [System.Collections.Generic.List[string]]::new()
+    foreach ($value in @($Values)) {
+        if ([string]::IsNullOrWhiteSpace($value)) {
+            continue
+        }
+        foreach ($part in ([string]$value -split ",")) {
+            $trimmed = $part.Trim()
+            if (-not [string]::IsNullOrWhiteSpace($trimmed)) {
+                $result.Add($trimmed)
+            }
+        }
+    }
+    return $result.ToArray()
+}
 function Get-ProxyCredentialParts {
     param([System.Uri]$Uri)
     $result = [ordered]@{
@@ -577,6 +604,14 @@ foreach ($arg in @("mvn")) {
 if (-not [string]::IsNullOrWhiteSpace($mavenSettingsFileName)) {
     $mavenArgs.Add("-s")
     $mavenArgs.Add("/maven-settings/$mavenSettingsFileName")
+}
+$normalizedMavenProjects = @(Normalize-ListValues -Values $MavenProjects)
+if ($normalizedMavenProjects.Count -gt 0) {
+    $mavenArgs.Add("-pl")
+    $mavenArgs.Add(($normalizedMavenProjects -join ","))
+    if ($AlsoMake) {
+        $mavenArgs.Add("-am")
+    }
 }
 foreach ($arg in @("clean", "package")) {
     $mavenArgs.Add($arg)

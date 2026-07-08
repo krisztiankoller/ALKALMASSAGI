@@ -12,6 +12,7 @@ param(
     [string]$ProxyUsername = "",
     [string]$ProxyPassword = "",
     [string]$PodmanTlsVerify = "true",
+    [string[]]$ServiceName = @(),
     [switch]$SkipBuild,
     [switch]$SkipLogArchive,
     [Alias("h", "?")]
@@ -74,6 +75,11 @@ Parameterek:
       Podman registry TLS certificate ellenorzes podman build kozben. Alapertelmezett: true.
       Ceges TLS inspection/x509 hiba eseten inkabb a proxy.config.json fajlban allitsd:
       "podmanTlsVerify": false
+  -ServiceName
+      Opcionalis service nev szuro. Ha meg van adva, csak a megadott service-ek
+      image-e/podja epul es indul ujra. Pelda:
+        -ServiceName app3
+        -ServiceName app3,app4
   -SkipBuild
       Nem buildel image-et, csak mar letezo image-ekbol inditja a podokat.
       Offline target gepen a run-offline.ps1 ezt hasznalja.
@@ -153,6 +159,22 @@ function ConvertTo-BooleanValue {
         return $false
     }
     throw "Invalid boolean value for ${Name}: '$Value'. Use true or false."
+}
+function Normalize-ListValues {
+    param([string[]]$Values)
+    $result = [System.Collections.Generic.List[string]]::new()
+    foreach ($value in @($Values)) {
+        if ([string]::IsNullOrWhiteSpace($value)) {
+            continue
+        }
+        foreach ($part in ([string]$value -split ",")) {
+            $trimmed = $part.Trim()
+            if (-not [string]::IsNullOrWhiteSpace($trimmed)) {
+                $result.Add($trimmed)
+            }
+        }
+    }
+    return $result.ToArray()
 }
 function Apply-ProxyConfigFile {
     param(
@@ -559,6 +581,29 @@ Set-ProxyEnvironment -HttpProxy $effectiveHttpProxy -HttpsProxy $effectiveHttpsP
 Ensure-Network $NetworkName
 $servicesConfig = Get-ServicesConfig -Path $ServicesFile
 $services = $servicesConfig.services
+$requestedServiceNames = @(Normalize-ListValues -Values $ServiceName)
+if ($requestedServiceNames.Count -gt 0) {
+    $requestedLookup = @{}
+    foreach ($requestedName in $requestedServiceNames) {
+        $requestedLookup[$requestedName.ToLowerInvariant()] = $false
+    }
+    $services = @($services | Where-Object {
+        $serviceNameValue = ([string]$_.name).ToLowerInvariant()
+        if ($requestedLookup.ContainsKey($serviceNameValue)) {
+            $requestedLookup[$serviceNameValue] = $true
+            return $true
+        }
+        return $false
+    })
+    $missingServiceNames = @($requestedLookup.Keys | Where-Object { -not $requestedLookup[$_] })
+    if ($missingServiceNames.Count -gt 0) {
+        throw "ServiceName not found in services file: $($missingServiceNames -join ', ')"
+    }
+    if ($services.Count -eq 0) {
+        throw "No services selected by -ServiceName."
+    }
+    Write-Output "Deploying selected service(s): $((@($services | ForEach-Object { [string]$_.name })) -join ', ')"
+}
 New-Item -ItemType Directory -Force -Path $BuildRoot | Out-Null
 foreach ($service in $services) {
     $name = [string]$service.name

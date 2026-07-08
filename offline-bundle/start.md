@@ -206,6 +206,46 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-springboot-
   -SkipBuild
 ```
 
+### 5/a. Csak egy Spring Boot app ujraepitese es ujratelepitese
+
+Fejlesztes kozben nem kell mindig mind a hat appot ujraforditani es
+ujrainditani. Pelda csak `app3` ujraepitesere:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-apps-with-podman.ps1 `
+  -MavenProjects app3 `
+  -AlsoMake `
+  -SkipTests
+
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-springboot-pods.ps1 `
+  -ServicesFile .\services.json `
+  -ServiceName app3 `
+  -SqlPassword "Alkalmassagi_2026!"
+```
+
+Ez Maven oldalon ezt jelenti:
+
+```text
+mvn -pl app3 -am clean package
+```
+
+A `-ServiceName app3` csak az `app3` service image-et epiti ujra, es csak az
+`app3-pod` podot hozza letre ujra. A tobbi app/pod fut tovabb.
+
+Tobb app is megadhato egyszerre:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-apps-with-podman.ps1 `
+  -MavenProjects app3,app4 `
+  -AlsoMake `
+  -SkipTests
+
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-springboot-pods.ps1 `
+  -ServicesFile .\services.json `
+  -ServiceName app3,app4 `
+  -SqlPassword "Alkalmassagi_2026!"
+```
+
 ### 6. Ellenorzes
 
 ```powershell
