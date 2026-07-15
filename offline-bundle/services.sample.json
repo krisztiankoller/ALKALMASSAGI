@@ -1,5 +1,13 @@
 {
   "_comment_00": "JSON-compatible comments: scripts ignore top-level _comment/_section fields.",
+  "_section_05": "==================== Optional Maven module Git sources ====================",
+  "moduleSources": {
+    "shared-library": {
+      "projectDir": "shared-library",
+      "branch": "develop",
+      "gitUrl": "https://github.com/example/shared-library.git"
+    }
+  },
   "_section_10": "==================== Kafka topics ====================",
   "kafkaTopics": {
     "app1Source": {
@@ -27,10 +35,13 @@
     }
   },
   "_section_30": "==================== Spring Boot application pods ====================",
+  "_comment_30": "branch is used only by scripts/sync-module-sources.ps1. If omitted, develop is used. gitUrl is optional and needed only when the module folder must be cloned.",
   "services": [
     {
       "name": "app1",
       "projectDir": "app1",
+      "branch": "develop",
+      "gitUrl": "https://github.com/example/app1.git",
       "hostPort": 40005,
       "containerPort": 8080,
       "imageTag": "local/app1:dev",

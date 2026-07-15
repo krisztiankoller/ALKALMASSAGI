@@ -23,6 +23,8 @@
 - Authenticated proxy guide: `PROXY-CONFIG.md`
 - Port configuration guide: `PORT-CONFIG.md`
 - Add a new app guide: `ADD-NEW-APP.md`
+- Module source sync guide: `MODULE-SOURCE-SYNC.md`
+- Maven library-first build guide: `MAVEN-LIBRARY-FIRST-BUILD.md`
 - Script structure guide: `SCRIPT-STRUCTURE.md`
 - Log viewer guide: `LOG-VIEWER.md`
 - Log persistence guide: `LOG-PERSISTENCE.md`
@@ -82,6 +84,8 @@ podman machine list
 podman machine start
 podman info
 
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\sync-module-sources.ps1
+
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-infra-pods.ps1 `
   -SqlPassword "Alkalmassagi_2026!" `
   -ExternalHostName localhost
@@ -92,6 +96,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-apps-with-po
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-springboot-pods.ps1 `
   -ServicesFile .\services.json
 ```
+
+`sync-module-sources.ps1` uses the root `pom.xml` modules and the optional
+`branch` field in `services.json`. If no branch is configured, it uses
+`develop`. For one module: `.\scripts\sync-module-sources.ps1 -ModuleName app3`.
 
 Then verify:
 
@@ -237,6 +245,10 @@ The script also starts `java-build-log-viewer`, so the same build log is visible
 The Maven builder image pull is retried 5 times by default.
 The `mvn clean package` execution is retried 5 times by default too, but it can
 be lowered to one attempt with `-MavenBuildRetries 1`.
+
+If the root `pom.xml` contains library, parent POM, or BOM modules that are not
+services, the build installs those modules into `data\maven-repo` before
+packaging the apps. Details: `MAVEN-LIBRARY-FIRST-BUILD.md`.
 
 If internet is available only through an authenticated proxy, fill `proxy.config.json` once and keep the same build command. Details: `PROXY-CONFIG.md`.
 

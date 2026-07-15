@@ -40,6 +40,9 @@ if ($LASTEXITCODE -ne 0) {
 
 podman info
 
+# Forrasok frissitese a root pom.xml moduljaihoz a services.json branch beallitasai alapjan.
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\sync-module-sources.ps1
+
 # Build + image pull + app image build + offline bundle generalas.
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\export-offline-bundle.ps1 `
   -ServicesFile .\services.json `
@@ -167,6 +170,32 @@ podman machine start
 podman info
 ```
 
+### 2/a. Modul forrasok frissitese Gitbol
+
+Ha a root `pom.xml` moduljaihoz a legfrissebb kodot is le akarod huzni, futtasd:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\sync-module-sources.ps1
+```
+
+A branch modulonkent a `services.json` `branch` mezojebol jon. Ha ott nincs
+megadva, a default `develop`. Reszletes leiras: `MODULE-SOURCE-SYNC.md`.
+
+Csak egy modul:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\sync-module-sources.ps1 `
+  -ModuleName app3
+```
+
+Branch feluliras:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\sync-module-sources.ps1 `
+  -ModuleName app3 `
+  -Branch feature/new-flow
+```
+
 ### 3. Infrastrukturapodok inditasa
 
 Ez inditja vagy ujrainditja az MSSQL, Kafka, Kafka UI, DbGate, Dozzle es NiFi
@@ -187,6 +216,12 @@ Java es nem kell Maven.
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-apps-with-podman.ps1 `
   -SkipTests
 ```
+
+Ha a root `pom.xml` tartalmaz library, parent POM vagy BOM modulokat is, amelyek
+nem szerepelnek a `services.json` `services` listajaban, a build ezeket eloszor
+`mvn clean install` paranccsal telepiti a `data\maven-repo` cache-be, es csak
+utana csomagolja az app modulokat. Reszletesen:
+`MAVEN-LIBRARY-FIRST-BUILD.md`.
 
 ### 5. App image-ek epitese es app podok inditasa
 
@@ -400,7 +435,7 @@ A `services.json` a runtime kozponti terkepe. Itt vannak:
 - `kafkaTopics`: az osszes Kafka topic neve es letrehozasi parametere.
 - `databases`: az app audit adatbazisok neve, schema-ja, kapcsolati adatai es schema scriptje.
 - `services`: az app podok listaja, portokkal, image nevekkel, runtime YAML
-  fajlnevekkel es env beallitasokkal.
+  fajlnevekkel, env beallitasokkal es opcionalis Git branch informacioval.
 
 Pelda:
 
@@ -428,6 +463,7 @@ Pelda:
     {
       "name": "app1",
       "projectDir": "app1",
+      "branch": "develop",
       "hostPort": 40005,
       "containerPort": 8080,
       "imageTag": "local/app1:dev",
@@ -446,6 +482,30 @@ alapertelmezes. Mas fajlnevhez pelda:
 
 Ilyenkor a script az `app1\src\main\resources\application-local.yaml` fajlt
 mountolja a kontenerbe `/app/config/application.yaml` neven.
+
+A `branch`, `gitBranch` vagy `sourceBranch` mezot csak a
+`scripts\sync-module-sources.ps1` hasznalja forrasfrissiteshez. Ha egyik sincs
+megadva, a forrasfrissites default branch-e `develop`. Ha a modul konyvtarat
+clone-ozni kell, megadhato `gitUrl`, `repoUrl`, `repositoryUrl` vagy
+`sourceRepository` is.
+
+Ha egy root `pom.xml` modul nem Spring Boot service, hanem library, ne tedd a
+`services` listaba. Add meg a `moduleSources` reszben:
+
+```json
+"moduleSources": {
+  "shared-library": {
+    "projectDir": "shared-library",
+    "branch": "develop",
+    "gitUrl": "https://github.com/example/shared-library.git"
+  }
+}
+```
+
+Ha a modul benne van a root `pom.xml`-ben, de nincs benne sem a `services`,
+sem a `moduleSources` reszben, az is mukodik: a script a modul nevet hasznalja
+konyvtarkent, es `develop` branch-et hasznal. `moduleSources` csak akkor kell,
+ha mas branch kell, vagy ha a hianyzo modul konyvtarat clone-ozni kell.
 
 Az appok `application.yaml` fajljai mondjak meg, hogy melyik DB resource kulcsot
 hasznaljak, es ugyanitt latszik kozvetlenul a Kafka routing:

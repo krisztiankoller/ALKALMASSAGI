@@ -4,6 +4,10 @@
   "_comment_02": "JSON does not support real comments, so these _comment fields are intentionally ignored by the scripts.",
   "_comment_03": "Database resources contain the application JDBC connection data. Use managed=false for external databases.",
   "_comment_04": "============================================================",
+  "_section_05": "==================== Optional Maven module Git sources ====================",
+  "_comment_05": "moduleSources is optional. Use it for root pom.xml modules that are not Spring Boot services, for example shared libraries.",
+  "_comment_06": "sync-module-sources.ps1 reads branch/gitUrl from here first, then falls back to services[*].branch, then develop.",
+  "moduleSources": {},
   "_section_10": "==================== Kafka topics ====================",
   "kafkaTopics": {
     "app1Source": {
@@ -110,10 +114,12 @@
   },
   "_section_30": "==================== Spring Boot application pods ====================",
   "_comment_30": "Service entries only describe pod/image/runtime metadata. Resource usage is still declared in each app application.yaml.",
+  "_comment_31": "branch/gitBranch/sourceBranch is used by scripts/sync-module-sources.ps1 when synchronizing module source code from Git. Default is develop.",
   "services": [
     {
       "name": "app1",
       "projectDir": "app1",
+      "branch": "develop",
       "hostPort": 40005,
       "containerPort": 8080,
       "imageTag": "local/app1:dev",
@@ -126,6 +132,7 @@
     {
       "name": "app2",
       "projectDir": "app2",
+      "branch": "develop",
       "hostPort": 40006,
       "containerPort": 8080,
       "imageTag": "local/app2:dev",
@@ -138,6 +145,7 @@
     {
       "name": "app3",
       "projectDir": "app3",
+      "branch": "develop",
       "hostPort": 40007,
       "containerPort": 8080,
       "imageTag": "local/app3:dev",
@@ -150,6 +158,7 @@
     {
       "name": "app4",
       "projectDir": "app4",
+      "branch": "develop",
       "hostPort": 40008,
       "containerPort": 8080,
       "imageTag": "local/app4:dev",
@@ -162,6 +171,7 @@
     {
       "name": "app5",
       "projectDir": "app5",
+      "branch": "develop",
       "hostPort": 40009,
       "containerPort": 8080,
       "imageTag": "local/app5:dev",
@@ -174,6 +184,7 @@
     {
       "name": "app6",
       "projectDir": "app6",
+      "branch": "develop",
       "hostPort": 40010,
       "containerPort": 8080,
       "imageTag": "local/app6:dev",

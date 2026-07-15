@@ -98,6 +98,9 @@ Ha a letezo repo sajat parent POM-mal mukodik, ket ut van:
 
 - Beilleszted Maven module-kent es igazodsz a root POM-hoz.
 - Kulon buildelt JAR-t hasznalsz, es a `services.json`-ban megadod a `jarPath` mezot.
+- Ha a parent/BOM source modul is a root `pom.xml` resze, de nem app, ne tedd
+  be a `services` listaba. A build eloszor installalja a library/BOM modulokat,
+  es utana buildeli az appokat.
 
 Offline, host Java/Maven nelkuli mukodeshez a Maven module-os megoldas a legkenyelmesebb.
 
@@ -350,6 +353,7 @@ Vegul adj hozza uj service bejegyzest a `services` listahoz:
 {
       "name": "app7",
       "projectDir": "app7",
+      "branch": "develop",
       "hostPort": 40012,
       "containerPort": 8080,
       "imageTag": "local/app7:dev",
@@ -367,6 +371,8 @@ Ha a JAR nem a szokasos `target` konyvtarban van, adhatsz meg `jarPath`-ot:
 {
   "name": "app7",
   "projectDir": "app7",
+  "branch": "develop",
+  "gitUrl": "https://github.com/example/app7.git",
   "jarPath": "app7/target/app7-0.0.1-SNAPSHOT.jar",
   "hostPort": 40012,
   "containerPort": 8080,
@@ -379,6 +385,16 @@ Fontos: a service bejegyzesben nincs `databaseRef`, `sourceTopicRef` vagy
 `destinationTopicRef`, es nincs `consumerGroupId` sem. A Kafka topic nevek es a
 consumer group ID az app sajat `application.yaml` fajljaban vannak.
 Az `applicationYaml` csak a host oldali runtime YAML fajlnevet valasztja ki.
+A `branch` mezot a `scripts\sync-module-sources.ps1` hasznalja, amikor a
+root `pom.xml` moduljait Gitbol frissiti. Ha a modul konyvtar hianyzik, a
+`gitUrl` segitsegevel clone-olni is tud.
+
+Forras frissitese csak az uj appra:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\sync-module-sources.ps1 `
+  -ModuleName app7
+```
 
 ## 8. DB admin kapcsolat
 
@@ -413,6 +429,14 @@ Ha Maven dependency-ket proxy mogott kell letolteni, elobb toltsd ki a projekt g
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-apps-with-podman.ps1 -SkipTests
 ```
+
+Ha az app parentje/BOM-ja szinten root Maven modul, de nem service, hagyd ki a
+`services` listabol. A build script eloszor `mvn clean install` paranccsal
+telepiti ezeket a library/BOM modulokat a lokalis Maven cache-be, majd utana
+buildeli az appot. Az app eredeti POM-jaban a `<relativePath/>` sor ilyenkor jo,
+mert Maven repositorybol oldja fel a parentet.
+
+Reszletesen: `MAVEN-LIBRARY-FIRST-BUILD.md`.
 
 Ez Podman alatt, a `java-build-pod` podban futtatja a Maven buildet.
 
@@ -601,6 +625,8 @@ Ha az `app7` mar letezik valahol repokent, ezt nezd vegig:
 - Nincs beegetett abszolut Windows utvonal.
 - Nincs beegetett gepnev/IP, amit masik gepen at kellene irni.
 - `services.json` tartalmazza az appot.
+- Ha Gitbol akarod frissiteni, a `services.json` service bejegyzes tartalmaz
+  `branch` mezot, es hianyzo modul konyvtar eseten `gitUrl` mezot is.
 - `services.json` `kafkaTopics` tartalmazza az uj source/cel topicokat.
 - `services.json` `databases` tartalmazza az uj audit adatbazist.
 - `nifi-flows.yaml` tartalmazza az apphoz tartozo file-to-Kafka topicot, ha fajlbol is akarsz uzenetet kuldeni ra.

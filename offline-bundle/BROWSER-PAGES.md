@@ -70,6 +70,8 @@ Nyisd meg ezt a fajlt bongeszoben, ha kattinthato linkgyujtemenyt szeretnel:
 - `PORT-CONFIG.md` - portok atallitasa.
 - `SQL-SERVER-CONNECTION.md` - MSSQL csatlakozas Windowsrol, kontenerbol es DbGate-bol.
 - `SCRIPT-STRUCTURE.md` - `scripts` es `scripts/private` konyvtarak szerepe.
+- `MODULE-SOURCE-SYNC.md` - Maven modulok Git forrasanak frissitese branch szerint.
+- `MAVEN-LIBRARY-FIRST-BUILD.md` - library/BOM modulok installja app build elott.
 - `LOG-VIEWER.md` - webes kontener log nezegeto Dozzle alapon.
 - `LOG-PERSISTENCE.md` - logok megorzese ujrainditas es pod ujraletrehozas elott.
 - `NIFI-FILE-TO-KAFKA.md` - fajlbol Kafka topicra kuldes Apache NiFi-vel.

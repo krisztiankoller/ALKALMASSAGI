@@ -12,6 +12,7 @@ Ezeket lehet normal uzemelteteshez vagy fejleszteshez futtatni:
 .\scripts\deploy-springboot-pods.ps1
 .\scripts\export-offline-bundle.ps1
 .\scripts\run-offline.ps1
+.\scripts\sync-module-sources.ps1
 .\scripts\configure-lan-firewall.ps1
 .\scripts\send-test-message.ps1
 .\scripts\export-container-logs.ps1
@@ -39,6 +40,7 @@ Rovid szerepuk:
 - `deploy-springboot-pods.ps1` - app1-app6 podok buildelese/inditasa.
 - `export-offline-bundle.ps1` - offline csomag generalasa image tar-ral es doksikkal.
 - `run-offline.ps1` - offline-bundle inditasa masik gepen.
+- `sync-module-sources.ps1` - root `pom.xml` modulok Git forrasanak frissitese a `services.json` branch beallitasai alapjan.
 - `configure-lan-firewall.ps1` - opcionalis LAN elereshez firewall/portproxy beallitas, admin jog kell.
 - `send-test-message.ps1` - teszt Kafka uzenet kuldese az `app1.source` topicba.
 - `export-container-logs.ps1` - aktualis kontenerlogok mentese a `data\logs` konyvtarba.

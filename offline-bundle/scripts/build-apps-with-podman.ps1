@@ -5,6 +5,7 @@ param(
     [string]$BuildLogViewerContainerName = "java-build-log-viewer",
     [string]$MavenRepoDir = "",
     [string]$BuildLogDir = "",
+    [string]$ServicesFile = "",
     [string]$ProxyConfigFile = "",
     [string]$MavenSettingsFile = "",
     [string]$HttpProxy = "",
@@ -43,7 +44,8 @@ build-apps-with-podman.ps1
 Cel:
   Maven alapu Java/Spring Boot alkalmazasokat buildel Podman kontenerben.
   A host gepen nem kell Java vagy Maven. A Maven kontener a teljes projektet
-  /workspace ala mountolja, es ott futtatja: mvn clean package.
+  /workspace ala mountolja. Ha vannak nem-service Maven modulok, azokat eloszor
+  installalja a lokalis Maven cache-be, utana package-eli az app modulokat.
 Hasznalat:
   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-apps-with-podman.ps1 [opciok]
 Gyakori pelda:
@@ -55,8 +57,10 @@ Mit csinal:
   2. Letrehozza a projekt alatti Maven cache konyvtarat: .\data\maven-repo.
   3. Ha proxy.config.json enabled=true, atadja a proxy beallitasokat Podmannak es Mavennek.
   4. Letrehozza vagy ujrahasznalja a java-build-pod Podman podot.
-  5. Elindit egy maven kontenert, amely a projektben mvn clean package parancsot futtat.
-  6. A kesz JAR-ok az appN\target konyvtarakba kerulnek.
+  5. A root pom.xml es services.json alapjan kivalasztja a library/BOM es app modulokat.
+  6. Ha van library/BOM modul, futtatja: mvn -pl <library-modulok> -am clean install.
+  7. Utana futtatja az app package fazist: mvn -pl <app-modulok> clean package.
+  8. A kesz JAR-ok az appN\target konyvtarakba kerulnek.
 Fontos parameterek:
   -MavenImage
       A builder image. Alapertelmezett: maven:3.9.9-eclipse-temurin-21
@@ -74,6 +78,12 @@ Fontos parameterek:
       Uresen: .\data\maven-repo
   -BuildLogDir
       Build log konyvtar. Uresen: .\data\build-logs
+  -ServicesFile
+      Services config JSON. Uresen: .\services.json
+      A script ebbol allapitja meg, mely root pom.xml modulok futtathato appok.
+      Ami Maven modul, de nem szerepel service projectDir-kent, azt library/BOM
+      modulnak tekinti es eloszor `mvn clean install` paranccsal telepiti a
+      lokalis Maven cache-be.
   -ProxyConfigFile
       Proxy config JSON. Uresen: .\proxy.config.json
   -MavenSettingsFile
@@ -109,8 +119,10 @@ Fontos parameterek:
         -MavenProjects app3,app4
       Ilyenkor nem a teljes reactor build fut, hanem csak a megadott modul(ok).
   -AlsoMake
-      Maven -am kapcsolo. A -MavenProjects mellett erdemes hasznalni, hogy a
-      kivalasztott modulok szukseges reactor fuggosegei is ujraepuljenek.
+      Maven -am kapcsolo az app package fazishoz. A library/BOM install fazis
+      ettol fuggetlenul mindig -am kapcsoloval fut.
+      A -MavenProjects mellett akkor hasznald, ha a kivalasztott appok
+      szukseges reactor fuggosegeit az app package fazisban is ujra akarod epiteni.
       Pelda eredmeny: mvn -pl app3 -am clean package.
   -SkipTests
       Maven tesztek kihagyasa: -DskipTests.
@@ -516,7 +528,80 @@ function Resolve-ProjectPathOrEmpty {
     }
     return Join-Path $Root $Path
 }
+function Get-MavenModulePaths {
+    param([string]$PomPath)
+    if (-not (Test-Path -LiteralPath $PomPath)) {
+        throw "Root POM does not exist: $PomPath"
+    }
+    [xml]$pom = Get-Content -LiteralPath $PomPath -Raw -Encoding UTF8
+    $namespaceManager = [System.Xml.XmlNamespaceManager]::new($pom.NameTable)
+    $namespaceManager.AddNamespace("m", "http://maven.apache.org/POM/4.0.0")
+    $nodes = @($pom.SelectNodes("/m:project/m:modules/m:module", $namespaceManager))
+    return @($nodes | ForEach-Object { ([string]$_.InnerText).Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+}
+function Get-JsonPropertyValue {
+    param(
+        [object]$Object,
+        [string]$Name
+    )
+    if ($null -eq $Object) {
+        return $null
+    }
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        return $null
+    }
+    return $property.Value
+}
+function Normalize-ModulePath {
+    param([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return ""
+    }
+    return (([string]$Value).Replace("\", "/").Trim("/"))
+}
+function Get-ServiceModulePaths {
+    param(
+        [string]$Path,
+        [string[]]$RootModules
+    )
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) {
+        return @()
+    }
+
+    $json = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+    $serviceList = Get-JsonPropertyValue -Object $json -Name "services"
+    if ($null -eq $serviceList) {
+        return @()
+    }
+
+    $rootLookup = @{}
+    foreach ($module in $RootModules) {
+        $rootLookup[(Normalize-ModulePath -Value $module).ToLowerInvariant()] = $module
+    }
+
+    $result = [System.Collections.Generic.List[string]]::new()
+    foreach ($service in @($serviceList)) {
+        $projectDir = [string](Get-JsonPropertyValue -Object $service -Name "projectDir")
+        if ([string]::IsNullOrWhiteSpace($projectDir)) {
+            $projectDir = [string](Get-JsonPropertyValue -Object $service -Name "name")
+        }
+        $normalizedProjectDir = (Normalize-ModulePath -Value $projectDir).ToLowerInvariant()
+        if ([string]::IsNullOrWhiteSpace($normalizedProjectDir)) {
+            continue
+        }
+        if ($rootLookup.ContainsKey($normalizedProjectDir)) {
+            $result.Add($rootLookup[$normalizedProjectDir])
+        }
+    }
+    return @($result.ToArray() | Select-Object -Unique)
+}
 $projectRoot = Split-Path -Parent $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($ServicesFile)) {
+    $ServicesFile = Join-Path $projectRoot "services.json"
+} elseif (-not [System.IO.Path]::IsPathRooted($ServicesFile)) {
+    $ServicesFile = Join-Path $projectRoot $ServicesFile
+}
 if ([string]::IsNullOrWhiteSpace($ProxyConfigFile)) {
     $ProxyConfigFile = Join-Path $projectRoot "proxy.config.json"
 } elseif (-not [System.IO.Path]::IsPathRooted($ProxyConfigFile)) {
@@ -593,84 +678,175 @@ if (-not $Offline) {
 if ($LASTEXITCODE -ne 0) {
     Invoke-Podman -Arguments @("pod", "create", "--name", $BuildPodName)
 }
-& podman container exists $BuildContainerName *> $null
-if ($LASTEXITCODE -eq 0) {
-    Invoke-Podman -Arguments @("rm", "-f", $BuildContainerName)
-}
-$mavenArgs = [System.Collections.Generic.List[string]]::new()
-foreach ($arg in @("mvn")) {
-    $mavenArgs.Add($arg)
-}
-if (-not [string]::IsNullOrWhiteSpace($mavenSettingsFileName)) {
-    $mavenArgs.Add("-s")
-    $mavenArgs.Add("/maven-settings/$mavenSettingsFileName")
-}
-$normalizedMavenProjects = @(Normalize-ListValues -Values $MavenProjects)
-if ($normalizedMavenProjects.Count -gt 0) {
-    $mavenArgs.Add("-pl")
-    $mavenArgs.Add(($normalizedMavenProjects -join ","))
-    if ($AlsoMake) {
-        $mavenArgs.Add("-am")
+function Remove-BuildContainerIfExists {
+    & podman container exists $BuildContainerName *> $null
+    if ($LASTEXITCODE -eq 0) {
+        Invoke-Podman -Arguments @("rm", "-f", $BuildContainerName)
     }
 }
-foreach ($arg in @("clean", "package")) {
-    $mavenArgs.Add($arg)
-}
-if ($SkipTests) {
-    $mavenArgs.Add("-DskipTests")
-}
-if ($Offline) {
-    $mavenArgs.Add("-o")
-}
-Add-MavenTlsVerifyArgs -ArgumentList $mavenArgs
-$runArgs = [System.Collections.Generic.List[string]]::new()
-foreach ($arg in @(
-    "run",
-    "--name", $BuildContainerName,
-    "--pod", $BuildPodName,
-    "-v", "${projectRootWsl}:/workspace",
-    "-v", "${mavenRepoWsl}:/root/.m2",
-    "-w", "/workspace"
-)) {
-    $runArgs.Add($arg)
-}
-if (-not [string]::IsNullOrWhiteSpace($mavenSettingsDirWsl)) {
-    $runArgs.Add("-v")
-    $runArgs.Add("${mavenSettingsDirWsl}:/maven-settings:ro")
-}
-Add-ProxyEnvArgs -ArgumentList $runArgs -HttpProxy $effectiveHttpProxy -HttpsProxy $effectiveHttpsProxy -NoProxy $effectiveNoProxy
-$runArgs.Add($MavenImage)
-foreach ($arg in $mavenArgs.ToArray()) {
-    $runArgs.Add($arg)
-}
-$mavenAttempts = [Math]::Max(1, $MavenBuildRetries)
-$mavenRetryDelaySeconds = [Math]::Max(0, $MavenBuildRetryDelaySeconds)
-for ($attempt = 1; $attempt -le $mavenAttempts; $attempt++) {
-    try {
-        Write-Output "Running Maven build (attempt $attempt/$mavenAttempts)..."
-        Invoke-PodmanWithLog -Arguments $runArgs.ToArray() -LogPath $currentBuildLog
-        break
+function New-MavenArgs {
+    param(
+        [string[]]$Projects,
+        [string[]]$Goals,
+        [bool]$UseAlsoMake
+    )
+    $args = [System.Collections.Generic.List[string]]::new()
+    $args.Add("mvn")
+    if (-not [string]::IsNullOrWhiteSpace($mavenSettingsFileName)) {
+        $args.Add("-s")
+        $args.Add("/maven-settings/$mavenSettingsFileName")
     }
-    catch {
-        if ($attempt -ge $mavenAttempts) {
-            if (-not $DisableBuildLogViewer) {
-                Start-BuildLogViewer -ContainerName $BuildLogViewerContainerName -PodName $BuildPodName -Image $MavenImage -BuildLogDirWsl $buildLogDirWsl
+    if ($Projects.Count -gt 0) {
+        $args.Add("-pl")
+        $args.Add(($Projects -join ","))
+        if ($UseAlsoMake) {
+            $args.Add("-am")
+        }
+    }
+    foreach ($goal in $Goals) {
+        $args.Add($goal)
+    }
+    if ($SkipTests) {
+        $args.Add("-DskipTests")
+    }
+    if ($Offline) {
+        $args.Add("-o")
+    }
+    Add-MavenTlsVerifyArgs -ArgumentList $args
+    return $args.ToArray()
+}
+function New-PodmanMavenRunArgs {
+    param([string[]]$MavenArguments)
+    $args = [System.Collections.Generic.List[string]]::new()
+    foreach ($arg in @(
+        "run",
+        "--name", $BuildContainerName,
+        "--pod", $BuildPodName,
+        "-v", "${projectRootWsl}:/workspace",
+        "-v", "${mavenRepoWsl}:/root/.m2",
+        "-w", "/workspace"
+    )) {
+        $args.Add($arg)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($mavenSettingsDirWsl)) {
+        $args.Add("-v")
+        $args.Add("${mavenSettingsDirWsl}:/maven-settings:ro")
+    }
+    Add-ProxyEnvArgs -ArgumentList $args -HttpProxy $effectiveHttpProxy -HttpsProxy $effectiveHttpsProxy -NoProxy $effectiveNoProxy
+    $args.Add($MavenImage)
+    foreach ($arg in $MavenArguments) {
+        $args.Add($arg)
+    }
+    return $args.ToArray()
+}
+function Invoke-MavenBuildPhase {
+    param(
+        [string]$PhaseName,
+        [string[]]$MavenArguments,
+        [bool]$KeepContainerAfterSuccess
+    )
+    $mavenAttempts = [Math]::Max(1, $MavenBuildRetries)
+    $mavenRetryDelaySeconds = [Math]::Max(0, $MavenBuildRetryDelaySeconds)
+    for ($attempt = 1; $attempt -le $mavenAttempts; $attempt++) {
+        try {
+            Remove-BuildContainerIfExists
+            $runArgs = New-PodmanMavenRunArgs -MavenArguments $MavenArguments
+            Write-Output "Running Maven $PhaseName (attempt $attempt/$mavenAttempts): $($MavenArguments -join ' ')"
+            Invoke-PodmanWithLog -Arguments $runArgs -LogPath $currentBuildLog
+            if (-not $KeepContainerAfterSuccess) {
+                Remove-BuildContainerIfExists
             }
-            throw "Maven build failed after $mavenAttempts attempt(s). Last error: $($_.Exception.Message)"
+            return
         }
+        catch {
+            if ($attempt -ge $mavenAttempts) {
+                if (-not $DisableBuildLogViewer) {
+                    Start-BuildLogViewer -ContainerName $BuildLogViewerContainerName -PodName $BuildPodName -Image $MavenImage -BuildLogDirWsl $buildLogDirWsl
+                }
+                throw "Maven $PhaseName failed after $mavenAttempts attempt(s). Last error: $($_.Exception.Message)"
+            }
 
-        Write-Warning "Maven build failed on attempt $attempt/$mavenAttempts. Retrying in $mavenRetryDelaySeconds seconds. Error: $($_.Exception.Message)"
-        & podman container exists $BuildContainerName *> $null
-        if ($LASTEXITCODE -eq 0) {
-            Invoke-Podman -Arguments @("rm", "-f", $BuildContainerName)
-        }
-        if ($mavenRetryDelaySeconds -gt 0) {
-            Start-Sleep -Seconds $mavenRetryDelaySeconds
+            Write-Warning "Maven $PhaseName failed on attempt $attempt/$mavenAttempts. Retrying in $mavenRetryDelaySeconds seconds. Error: $($_.Exception.Message)"
+            Remove-BuildContainerIfExists
+            if ($mavenRetryDelaySeconds -gt 0) {
+                Start-Sleep -Seconds $mavenRetryDelaySeconds
+            }
         }
     }
 }
-if (-not $KeepBuildContainer) {
-    Invoke-Podman -Arguments @("rm", $BuildContainerName)
+
+$rootModules = @(Get-MavenModulePaths -PomPath (Join-Path $projectRoot "pom.xml"))
+$serviceModules = @(Get-ServiceModulePaths -Path $ServicesFile -RootModules $rootModules)
+$requestedModules = @(Normalize-ListValues -Values $MavenProjects)
+
+$rootModuleLookup = @{}
+foreach ($module in $rootModules) {
+    $rootModuleLookup[(Normalize-ModulePath -Value $module).ToLowerInvariant()] = $module
+}
+foreach ($module in $requestedModules) {
+    $normalized = (Normalize-ModulePath -Value $module).ToLowerInvariant()
+    if (-not $rootModuleLookup.ContainsKey($normalized)) {
+        throw "Maven project '$module' is not listed in root pom.xml modules."
+    }
+}
+
+$serviceModuleLookup = @{}
+foreach ($module in $serviceModules) {
+    $serviceModuleLookup[(Normalize-ModulePath -Value $module).ToLowerInvariant()] = $true
+}
+
+$libraryModules = @()
+if ($serviceModules.Count -gt 0) {
+    $libraryModules = @($rootModules | Where-Object {
+        -not $serviceModuleLookup.ContainsKey((Normalize-ModulePath -Value $_).ToLowerInvariant())
+    })
+}
+
+$packageAllModules = $false
+if ($requestedModules.Count -gt 0) {
+    $requestedResolved = @($requestedModules | ForEach-Object { $rootModuleLookup[(Normalize-ModulePath -Value $_).ToLowerInvariant()] })
+    $libraryLookup = @{}
+    foreach ($module in $libraryModules) {
+        $libraryLookup[(Normalize-ModulePath -Value $module).ToLowerInvariant()] = $true
+    }
+    $appModulesToPackage = @($requestedResolved | Where-Object {
+        -not $libraryLookup.ContainsKey((Normalize-ModulePath -Value $_).ToLowerInvariant())
+    })
+    $explicitLibraryModules = @($requestedResolved | Where-Object {
+        $libraryLookup.ContainsKey((Normalize-ModulePath -Value $_).ToLowerInvariant())
+    })
+    if ($appModulesToPackage.Count -gt 0) {
+        $libraryModulesToInstall = $libraryModules
+    } else {
+        $libraryModulesToInstall = $explicitLibraryModules
+    }
+} elseif ($serviceModules.Count -gt 0) {
+    $appModulesToPackage = $serviceModules
+    $libraryModulesToInstall = $libraryModules
+} else {
+    $appModulesToPackage = @()
+    $libraryModulesToInstall = @()
+    $packageAllModules = $true
+}
+
+if ($libraryModulesToInstall.Count -gt 0) {
+    Write-Output "Library/BOM modules to install first: $($libraryModulesToInstall -join ', ')"
+    $libraryMavenArgs = New-MavenArgs -Projects $libraryModulesToInstall -Goals @("clean", "install") -UseAlsoMake $true
+    Invoke-MavenBuildPhase -PhaseName "library install" -MavenArguments $libraryMavenArgs -KeepContainerAfterSuccess $false
+} else {
+    Write-Output "No separate library/BOM modules detected before app build."
+}
+
+if ($packageAllModules) {
+    Write-Output "App modules to package: all root pom.xml modules"
+    $appMavenArgs = New-MavenArgs -Projects @() -Goals @("clean", "package") -UseAlsoMake $false
+    Invoke-MavenBuildPhase -PhaseName "app package" -MavenArguments $appMavenArgs -KeepContainerAfterSuccess $KeepBuildContainer
+} elseif ($appModulesToPackage.Count -gt 0) {
+    Write-Output "App modules to package: $($appModulesToPackage -join ', ')"
+    $appMavenArgs = New-MavenArgs -Projects $appModulesToPackage -Goals @("clean", "package") -UseAlsoMake ([bool]$AlsoMake)
+    Invoke-MavenBuildPhase -PhaseName "app package" -MavenArguments $appMavenArgs -KeepContainerAfterSuccess $KeepBuildContainer
+} else {
+    Write-Output "No app modules selected for package phase."
 }
 if (-not $DisableBuildLogViewer) {
     Start-BuildLogViewer -ContainerName $BuildLogViewerContainerName -PodName $BuildPodName -Image $MavenImage -BuildLogDirWsl $buildLogDirWsl
